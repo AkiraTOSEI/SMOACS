@@ -190,7 +190,7 @@ main_experiment(
 
 
 ### Band gap and Formation Energy Optimization While Preserving Perovskite stuctures with ALIGNN
-The settings are almost the same as S(ALI) on the Table 3 in our paper, but `ALIGNN_num_update_graphs` is changed for a small demonstration. The file ./initial_crystal_candidates/random_perovskite_1 contains a randomly shaped $\mathrm{BaTiO_3}$. The oxidation states of the Ba, Ti, and O sites are specified using `site_atom_oxidation_dict{'Atom_settings'}`.
+The settings are almost the same as S(ALI) on the Table 3 in our paper, but `ALIGNN_num_update_graphs` is changed for a small demonstration. The file `./initial_crystal_candidates/random_perovskite_1` contains a randomly shaped $\mathrm{BaTiO_3}$. The oxidation states of the Ba, Ti, and O sites are specified using `site_atom_oxidation_dict{'Atom_settings'}`.
 ```python
 
 # ALIGNN / perovskite structure
