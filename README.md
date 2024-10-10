@@ -12,10 +12,10 @@
 
 
 
-
+∂ç
 
 ## Paper
-
+∂ç
 For detailed information, please refer to our paper:
 
 [Adaptive Constraint Integration for Simultaneously Optimizing Crystal Structures with Multiple Targeted Properties](Insert_Link_Here)
@@ -335,7 +335,7 @@ main_experiment(
 
 
 ### Identifying the Most Stable Crystal Structures
-We experimented to see if the crystal structure of metallic silicon with a zero band gap could be identified. Initially, we extracted structures from the MEGNet dataset that contained only one atom besides Si, using them as the initial structure. The atomic distribution was fixed with a one-hot vector indicating silicon, and only the lattice constants were optimized. The target properties for optimization were a zero band gap and formation energy minimization. We chose silicon structures from the MEGNet dataset with a band gap of 0 eV as the reference and compared these with the optimized structures that exhibited the lowest formation energy. See details for Section A.3.
+We experimented to see if the crystal structure of metallic silicon with a zero band gap could be identified. Initially, we extracted structures from the MEGNet dataset that contained only one atom besides Si, using them as the initial structure. The atomic distribution was fixed with a one-hot vector indicating silicon, and only the lattice constants were optimized. The target properties for optimization were a zero band gap and formation energy minimization. We chose silicon structures from the MEGNet dataset with a band gap of 0 eV as the reference and compared these with the optimized structures that exhibited the lowest formation energy. See details for Section A.3 in our paper.
 
 ```python
 main_experiment(
