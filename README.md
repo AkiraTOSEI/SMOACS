@@ -10,10 +10,6 @@
 
 
 
-
-
-∂ç
-
 ## Paper
 ∂ç
 For detailed information, please refer to our paper:
