@@ -15,17 +15,57 @@ For detailed information, please refer to our paper:
 
 [Adaptive Constraint Integration for Simultaneously Optimizing Crystal Structures with Multiple Targeted Properties](Insert_Link_Here)
 
-<!-- 
+
+### Citation
+
 If you use this work in your research, please cite:
 
-```bibtex
-@article{yourpaper2023,
+```text
+@article{afujii2024,
   title={Adaptive Constraint Integration for Simultaneously Optimizing Crystal Structures with Multiple Targeted Properties},
-  author={Your Name},
+  author={Akihiro FUJII, Yoshitaka Ushiku, Koji Shimizu, Anh Khoa Augustin Lu, Satoshi Watanabe },
   journal={arXiv preprint arXiv:XXXX.XXXXX},
   year={2024}
 }
 ```
+
+The code in this repository uses the code of Crystalformer and ALIGNN. Crystalformer's pretrained models provided in its [Crystalformer's repository](https://github.com/omron-sinicx/crystalformer) and ALIGNN's pretrained models provided in its [ALIGNN's repository](https://github.com/usnistgov/alignn). Thus, if you use our code in your projects, please cite both our work and the original Crystalformer paper or ALIGNN:
+
+#### Crystalformer
+```text
+@inproceedings{taniai2024crystalformer,
+  title     = {Crystalformer: Infinitely Connected Attention for Periodic Structure Encoding},
+  author    = {Tatsunori Taniai and
+               Ryo Igarashi and
+               Yuta Suzuki and
+               Naoya Chiba and
+               Kotaro Saito and
+               Yoshitaka Ushiku and
+               Kanta Ono
+               },
+  booktitle = {The Twelfth International Conference on Learning Representations},
+  year      = {2024},
+  url       = {https://openreview.net/forum?id=fxQiecl9HB}
+}
+```
+
+#### ALIGNN
+```text
+@article{choudhary2021atomistic,
+  title={Atomistic line graph neural network for improved materials property predictions},
+  author={Choudhary, Kamal and DeCost, Brian},
+  journal={npj Computational Materials},
+  volume={7},
+  number={1},
+  pages={185},
+  year={2021},
+  publisher={Nature Publishing Group UK London}
+}
+```
+
+ 
+<!-- 
+
 -->
 
 ## Enviorment
