@@ -29,7 +29,7 @@ If you use this work in your research, please cite:
 }
 ```
 
-The code in this repository uses the code of Crystalformer and ALIGNN. Crystalformer's pretrained models provided in its [Crystalformer's repository](https://github.com/omron-sinicx/crystalformer) and ALIGNN's pretrained models provided in its [ALIGNN's repository](https://github.com/usnistgov/alignn). Thus, if you use our code in your projects, please cite both our work and the original Crystalformer paper or ALIGNN:
+The code in this repository uses the code of Crystalformer and ALIGNN. Crystalformer's pretrained models provided in [Crystalformer's official repository](https://github.com/omron-sinicx/crystalformer) and ALIGNN's pretrained models provided in [ALIGNN's official repository](https://github.com/usnistgov/alignn). Thus, if you use our code in your projects, please cite both our work and the Crystalformer paper or ALIGNN:
 
 #### Crystalformer
 ```text
