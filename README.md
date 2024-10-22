@@ -13,7 +13,7 @@
 ## Paper
 For detailed information, please refer to our paper:
 
-[Adaptive Constraint Integration for Simultaneously Optimizing Crystal Structures with Multiple Targeted Properties](Insert_Link_Here)
+[Adaptive Constraint Integration for Simultaneously Optimizing Crystal Structures with Multiple Targeted Properties](https://arxiv.org/abs/2410.08562)
 
 
 ### Citation
