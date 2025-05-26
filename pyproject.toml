@@ -1,0 +1,22 @@
+[project]
+name = "smoace-release-test"
+version = "0.1.0"
+description = ""
+license = {text = "MIT"}
+readme = "README.md"
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.poetry.dependencies]
+python = "^3.10"
+numpy = "^1.24"
+matplotlib = "^3.7"
+periodictable = "*"
+alignn = ">=2025.4.1,<2026.0.0"
+pymatgen = "==2023.10.11"
+smact = "==2.5.5"
+ipython = "==8.10.0"

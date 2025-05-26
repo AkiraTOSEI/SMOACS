@@ -1,0 +1,60 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# VSCode settings
+.vscode/
+
+# PyCharm settings
+.idea/
+
+# PyTorch artifacts
+*.pt
+*.pth
+*.ckpt
+
+# NumPy / CSV data files
+*.npy
+*.npz
+*.csv
+
+# Datasets or experiment logs
+data/
+logs/
+checkpoints/
+runs/  # TensorBoard log directory
+
+# Hydra output
+outputs/
+multirun/
+
+# pip wheel caches
+*.egg-info/
+dist/
+build/
+.eggs/
+pip-wheel-metadata/
+
+# System files
+.DS_Store
+Thumbs.db
+
+# Test cache
+.pytest_cache/
+
+# Jupyter Notebook hidden state
+.ipynb_checkpoints/
+
