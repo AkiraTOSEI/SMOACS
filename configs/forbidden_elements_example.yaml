@@ -1,0 +1,8 @@
+# Example element constraint config.
+#
+# The base mask is not bundled in Git. Generate or place it under data/ before
+# running this config.
+element_constraints:
+  mask_dict_path: data/intermidiate/mask_dict_super_common.npz
+  forbidden_elements:
+    - H

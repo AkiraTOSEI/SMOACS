@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "smoacs"
+version = "0.1.0"
+description = "SMOACS: gradient-based multi-property materials design"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+dependencies = [
+  "numpy==2.4.3",
+  "pymatgen==2026.5.4",
+  "scipy",
+  "pandas",
+  "matplotlib",
+  "tqdm",
+  "requests",
+  "setuptools<81",
+  "ase==3.27.0",
+  "jarvis-tools",
+  "periodictable",
+  "smact==2.5.5",
+  "optimade",
+  "optuna",
+  "pydantic",
+  "pydantic-settings",
+  "scikit-learn",
+  "lmdb",
+  "ipython",
+  "pyyaml",
+  "mp-api",
+  "mattersim @ git+https://github.com/AkiraTOSEI/differentiable-mattersim.git",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "black",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = [
+  "src*",
+  "third_party*",
+  "scripts*",
+]
+namespaces = true

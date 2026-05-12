@@ -1,0 +1,125 @@
+conditions:
+  - id: alignn_supercon
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - tc_and_efrom
+      - --target_val
+      - maximization
+  - id: crystalformer_wide_bg
+    args:
+      - --model_name
+      - Crystalformer
+      - --task
+      - bg_and_eform
+      - --target_val
+      - "4.0"
+  - id: alignn_wide_bg
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - bg_and_eform
+      - --target_val
+      - "4.5"
+  - id: alignn_spg_gap_123
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - bg_and_eform
+      - --target_val
+      - "4.5"
+      - --space_group
+      - "123"
+  - id: alignn_spg1_123
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - eform_only
+      - --space_group
+      - "123"
+  - id: alignn_spg2_123
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - bg_and_eform2
+      - --space_group
+      - "123"
+  - id: alignn_spg3_123
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - bg_and_eform3
+      - --space_group
+      - "123"
+  - id: alignn_perov
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - bg_and_eform
+      - --structure
+      - perovskite
+      - --target_val
+      - "0.5"
+  - id: crystalformer_perov
+    args:
+      - --model_name
+      - Crystalformer
+      - --task
+      - bg_and_eform
+      - --structure
+      - perovskite
+      - --target_val
+      - "0.5"
+  - id: alignn_perov3x3x3
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - bg_and_ehull
+      - --structure
+      - perovskite3x3x3
+      - --target_val
+      - "4.0"
+  - id: crystalformer_perov3x3x3
+    args:
+      - --model_name
+      - Crystalformer
+      - --task
+      - bg_and_ehull
+      - --structure
+      - perovskite3x3x3
+      - --target_val
+      - "4.0"
+  - id: alignn_bg_e_hull
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - bg_and_ehull
+      - --target_val
+      - "0.5"
+  - id: alignn_B_and_eform
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - B_and_eform
+      - --target_val
+      - "160.0"
+  - id: alignn_superhard
+    args:
+      - --model_name
+      - ALIGNN
+      - --task
+      - superhard
+      - --energy_coef
+      - "1.0"
+      - --energy_every
+      - "1"

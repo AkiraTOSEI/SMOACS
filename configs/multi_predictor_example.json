@@ -1,0 +1,52 @@
+{
+  "predictors": [
+    {
+      "name": "alignn_bg",
+      "type": "alignn",
+      "model_name": "mp_gappbe_alignnn",
+      "output_key": "bandgap",
+      "clip_min": 0.0
+    },
+    {
+      "name": "alignn_eform",
+      "type": "alignn",
+      "model_name": "mp_e_form_alignnn",
+      "output_key": "e_form"
+    },
+    {
+      "name": "alignn_ehull",
+      "type": "alignn",
+      "model_name": "mp_e_hull_alignnn",
+      "output_key": "e_hull"
+    }
+  ],
+  "legacy_output_map": {
+    "bandgap": "bandgap",
+    "e_form": "e_form"
+  },
+  "loss_terms": [
+    {
+      "type": "weighted_sum",
+      "name": "base_sum",
+      "items": [
+        {
+          "key": "bandgap",
+          "weight": 1.0
+        },
+        {
+          "key": "e_form",
+          "weight": 1.0
+        }
+      ]
+    },
+    {
+      "type": "ratio",
+      "name": "bg_over_ehull",
+      "numerator": "bandgap",
+      "denominator": "e_hull",
+      "eps": 1.0e-6,
+      "weight": 0.3
+    }
+  ],
+  "log_interval": 10
+}

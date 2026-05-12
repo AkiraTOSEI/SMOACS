@@ -1,0 +1,23 @@
+{
+  "p1": 0.02387021820484414,
+  "p99": 0.17679941943135416,
+  "rho_min": 0.02267670729460193,
+  "rho_max": 0.18563939040292188,
+  "n_ref": 1000,
+  "conditions": {
+    "allowed_elements": [
+      "Al",
+      "B",
+      "C",
+      "H",
+      "N",
+      "O",
+      "Si"
+    ],
+    "nsites_min": 2,
+    "nsites_max": 50,
+    "n_ref": 1000,
+    "source": "materials_project"
+  },
+  "created_at": "2025-12-24T04:27:53.026947+00:00"
+}

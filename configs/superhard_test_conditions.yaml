@@ -1,0 +1,16 @@
+conditions:
+- id: superhard_test
+  exp_name: ALIGNN__superhard__test
+  args:
+  - --model_name
+  - ALIGNN
+  - --task
+  - superhard
+  - --energy_coef
+  - '1.0'
+  - --energy_every
+  - '1'
+  - --k_coef
+  - '1'
+  - --element_count_l1_weight
+  - '0'

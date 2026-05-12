@@ -1,0 +1,31 @@
+predictors:
+  - name: bg
+    type: alignn
+    checkpoint: mp_gappbe_alignnn
+    params:
+      clip_min: 0.0
+  - name: ef
+    type: alignn
+    checkpoint: mp_e_form_alignnn
+    params: {}
+  - name: tc
+    type: alignn
+    checkpoint: mp_tc_alignnn
+    params: {}
+
+loss:
+  terms:
+    - name: gap_loss
+      expr: "gap_loss(pred.bg)"
+      weight: 1.0
+    - name: ef_penalty
+      expr: "pred.ef"
+      weight: 1.0
+    - name: ratio_bonus
+      expr: "safe_div(pred.bg, pred.ef, 1e-8)"
+      weight: 0.1
+
+output:
+  primary_metrics:
+    bandgap_onehot: pred.bg
+    ef_onehot: pred.ef

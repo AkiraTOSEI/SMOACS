@@ -1,0 +1,32 @@
+# Half-metal level5 element constraints.
+#
+# This config is intended to be combined with the half-metal CLI defaults.
+# It does not define predictors or loss terms.
+element_constraints:
+  mask_dict_path: data/intermidiate/mask_dict_super_common.npz
+  forbidden_elements:
+    - Li
+    - Sc
+    - Co
+    - Ni
+    - Ga
+    - Y
+    - Cd
+    - La
+    - Ce
+    - Pr
+    - Nd
+    - Pm
+    - Sm
+    - Eu
+    - Gd
+    - Tb
+    - Dy
+    - Ho
+    - Er
+    - Tm
+    - Yb
+    - Lu
+    - Pt
+    - Hg
+    - Pb

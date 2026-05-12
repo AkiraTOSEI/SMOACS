@@ -1,0 +1,102 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.cache/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+*.egg-info/
+build/
+dist/
+.eggs/
+pip-wheel-metadata/
+
+# Local agent/editor state
+.agents/
+.codex/
+.vscode/
+.idea/
+AGENTS.md
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Large/generated data and run outputs
+/data/**
+!/data/
+!/data/intermidiate/
+!data/intermidiate/mask_dict_super_common.npz
+!data/intermidiate/ionic_mask_dict_super_common.npz
+!data/intermidiate/ionic_radii_dict_super_common.npz
+workspace/
+mattersim_workspace/
+main_results/
+results/
+result_dir/
+cpu_results/
+logs/
+locks/
+timing_logs/
+tmp*/
+tmp_*/
+checkpoints/
+runs/
+outputs/
+multirun/
+init_poscars/
+cif/
+mp_relaxed/
+train_data_data_range
+*.db
+*.sqlite
+
+# Model weights and bundled checkpoints
+*.ckpt
+*.pt
+*.pth
+*.zip
+/models/
+/differentiable_MatterSim/
+/differentiable_mattersim/
+/differentiable-mattersim/
+
+# Third-party public helper data used by README generation commands
+!scripts/data_generations/density_ref_superhard.json
+
+# Tests are kept out of the public GitHub release.
+tests/
+pytest.ini
+
+# Internal migration notes and local verification records
+README.md.bak*
+survey.md
+overall_plan.md
+dynamic_test_baseline.md
+dynamic_test_new_repo.md
+progress.md
+problems.md
+spec.md
+spec_README.md
+renew_env_plan.md
+new_env_build.md
+numpy2_env_build.md
+alignn_vendor_plan.md
+half-metal-forbit-mask.md
+add_mask.md
+docs/
+
+# Local notebooks/output artifacts
+.ipynb_checkpoints/
+*.ipynb_checkpoints/
+*.csv
+*.jsonl
+
+# System files
+.DS_Store
+Thumbs.db
