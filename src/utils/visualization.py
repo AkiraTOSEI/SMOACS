@@ -43,11 +43,13 @@ def optimization_history_display_for_promising_candidates(
     if ef_history.ndim == 1:
         ef_history = ef_history[:, None]
     # formation energyが低く、指定のバンドギャップを満たすものから順
-    sorted_index = (
-        pd.read_csv(csv_path)
-        .sort_values(["loss_onehot", "ef_onehot"])["lattice_index"]
-        .values
+    candidates = pd.read_csv(csv_path)
+    sort_columns = (
+        ["loss_total"]
+        if "loss_total_onehot" in candidates.columns
+        else ["loss_onehot", "ef_onehot"]
     )
+    sorted_index = candidates.sort_values(sort_columns)["lattice_index"].values
     num_display = min(num_display, len(sorted_index))
 
     title_font_size, label_font_size, legend_font_size, tick_font_size = (

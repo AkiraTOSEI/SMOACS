@@ -1,4 +1,5 @@
 import random
+from copy import deepcopy
 from typing import List, Optional, Tuple
 
 import torch
@@ -151,6 +152,7 @@ def copy_and_mutate_update(
     Ef_criteria: float = -0.5,
     tolerance_criteria: float = 0.1,
     test_mode: bool = False,
+    graph_fallback_geometry: Optional[list] = None,
 ):
     """Performs an evolutionary update (copy and mutate) on mini-batch samples,
     and returns the updated parameters along with new cry_atom_data and new_size.
@@ -472,6 +474,11 @@ def copy_and_mutate_update(
                         new_cry_wp_data = torch.cat([front, mutated_ids, back], dim=0)
                         new_wp_size[i] = mutated_block.size(0)
                         new_size[i] = new_size[chosen_good_crystal]
+
+                        if graph_fallback_geometry is not None:
+                            graph_fallback_geometry[i] = deepcopy(
+                                graph_fallback_geometry[chosen_good_crystal]
+                            )
 
                         #front_tensor = new_cry_atom_data[:start_i]
                         #back_tensor = new_cry_atom_data[end_i:]

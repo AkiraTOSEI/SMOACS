@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from src.losses.loss_utils import calculate_loss_from_output
+from src.losses.force_pressure_loss import active_force_pressure, final_force_pressure
 from src.smoacs_opt_eval.alignn_forward import (
     ALIGNN_prediction,
     forward_propagation_ALIGNN,
@@ -68,35 +69,54 @@ def evaluation_for_each_batch_ALIGNN(
             - 'bandgap_onehot', 'ef_onehot', 'loss_onehot'
             - 'onehot_x', 'onehot_ox_mask', 'tolerance', 'tolerance_loss'
     """
+    if wyckoff_expander is None:
+        # Build the final graph from exactly the rounded state used for inference.
+        # Do not mutate the live optimizer parameters supplied by the caller.
+        optimized_mini_batch_inputs_dict = optimized_mini_batch_inputs_dict.copy()
+        rounded_names = {"scaled_batch_abc", "scaled_batch_angle", "batch_dir_coords"}
+        final_targets = []
+        for name in optimized_mini_batch_inputs_dict["optimization_target_names"]:
+            value = optimized_mini_batch_inputs_dict[name].detach().clone()
+            if name in rounded_names:
+                value = torch.round(value, decimals=4)
+            optimized_mini_batch_inputs_dict[name] = value
+            final_targets.append(value)
+        optimized_mini_batch_inputs_dict["optimization_targets"] = final_targets
+
     print('<info> graph update at evaluation stage')
     optimized_mini_batch_inputs_dict = graph_parameter_update(
-        optimization_target_names=optimized_mini_batch_inputs_dict['optimization_target_names'],
-        optimization_targets=optimized_mini_batch_inputs_dict['optimization_targets'],
+        optimization_target_names=optimized_mini_batch_inputs_dict[
+            "optimization_target_names"
+        ],
+        optimization_targets=optimized_mini_batch_inputs_dict["optimization_targets"],
         mini_batch_inputs_dict=optimized_mini_batch_inputs_dict,
         output_dict=optimized_mini_batch_inputs_dict,
-        num_batch_crystal=settings_dict['num_batch_crystal'],
+        num_batch_crystal=settings_dict["num_batch_crystal"],
         wyckoff_expander=wyckoff_expander,
-    ) 
+        scalers=scalers,
+        limit_coords_displacement=limit_coords_displacement,
+    )
 
     abc_scaler, angle_scaler = scalers['abc_scaler'], scalers['angle_scaler']
-    
+
     device = optimized_mini_batch_inputs_dict["scaled_batch_abc"].device
     g = optimized_mini_batch_inputs_dict['g'].to(device)
     lg = optimized_mini_batch_inputs_dict['lg'].to(device)
     atom_feat_matrix = optimized_mini_batch_inputs_dict['atom_feat_matrix'].to(device)
     radii_tensor = optimized_mini_batch_inputs_dict['radii_tensor'].to(device)
-    
-    #print("site_ids in eval:", optimized_mini_batch_inputs_dict['site_ids'])
-    abc_range = settings_dict['abc_range']
+
+    # print("site_ids in eval:", optimized_mini_batch_inputs_dict['site_ids'])
+    force_pressure_config = settings_dict.get("force_pressure_config")
+    force_pressure_on = any(active_force_pressure(force_pressure_config))
+    abc_range = settings_dict["abc_range"]
     angle_range = settings_dict['angle_range']
     superhard_mode = settings_dict.get("superhard_cfg") is not None
 
-
     with torch.no_grad():
         atomic_distribution = optimized_mini_batch_inputs_dict['atomic_distribution']
-        #scaled_batch_abc = optimized_mini_batch_inputs_dict['scaled_batch_abc']
-        #scaled_batch_angle = optimized_mini_batch_inputs_dict['scaled_batch_angle']
-        #batch_dir_coords = optimized_mini_batch_inputs_dict['batch_dir_coords'] #あとで消す??
+        # scaled_batch_abc = optimized_mini_batch_inputs_dict['scaled_batch_abc']
+        # scaled_batch_angle = optimized_mini_batch_inputs_dict['scaled_batch_angle']
+        # batch_dir_coords = optimized_mini_batch_inputs_dict['batch_dir_coords'] #あとで消す??
         scaled_batch_abc = torch.round(optimized_mini_batch_inputs_dict['scaled_batch_abc'],decimals=4)
         scaled_batch_angle = torch.round(optimized_mini_batch_inputs_dict['scaled_batch_angle'],decimals=4)
         batch_dir_coords = torch.round(optimized_mini_batch_inputs_dict['batch_dir_coords'],decimals=4)
@@ -134,16 +154,16 @@ def evaluation_for_each_batch_ALIGNN(
             }
             if tolerance_loss_func is not None:
                 context["tolerance_loss"] = tolerance_loss_func
-            _, _, _ = loss_composer.compute(pred_dict, context)
+            _, base_soft, _ = loss_composer.compute(pred_dict, context)
             if superhard_mode:
                 loss_dist = torch.zeros_like(bandgap_dist)
             else:
-                _, _, loss_dist, _, _, _ = calculate_loss_from_output(
+                _, legacy_base_soft, loss_dist, _, _, _ = calculate_loss_from_output(
                     bandgap_pred=bandgap_dist,
                     ef_pred=ef_dist,
-                    sharpened_ox_mask=output_dict['sharpened_ox_mask'],
-                    normalized_dist=output_dict['normalized_dist'],
-                    site_ids=optimized_mini_batch_inputs_dict['site_ids'].to(device),
+                    sharpened_ox_mask=output_dict["sharpened_ox_mask"],
+                    normalized_dist=output_dict["normalized_dist"],
+                    site_ids=optimized_mini_batch_inputs_dict["site_ids"].to(device),
                     gap_loss_func=gap_loss_func,
                     tolerance_loss_func=tolerance_loss_func,
                     ef_coef=e_form_coef,
@@ -155,12 +175,12 @@ def evaluation_for_each_batch_ALIGNN(
             if superhard_mode:
                 loss_dist = torch.zeros_like(bandgap_dist)
             else:
-                _, _, loss_dist, _, _, _ = calculate_loss_from_output(
+                _, legacy_base_soft, loss_dist, _, _, _ = calculate_loss_from_output(
                     bandgap_pred=bandgap_dist,
                     ef_pred=ef_dist,
-                    sharpened_ox_mask=output_dict['sharpened_ox_mask'],
-                    normalized_dist=output_dict['normalized_dist'],
-                    site_ids=optimized_mini_batch_inputs_dict['site_ids'].to(device),
+                    sharpened_ox_mask=output_dict["sharpened_ox_mask"],
+                    normalized_dist=output_dict["normalized_dist"],
+                    site_ids=optimized_mini_batch_inputs_dict["site_ids"].to(device),
                     gap_loss_func=gap_loss_func,
                     tolerance_loss_func=tolerance_loss_func,
                     ef_coef=e_form_coef,
@@ -210,29 +230,36 @@ def evaluation_for_each_batch_ALIGNN(
             tolerance_loss = torch.zeros_like(bandgap_onehot)
             tolerance = torch.zeros_like(bandgap_onehot)
         else:
-            _, _, loss_onehot, _, tolerance_loss, tolerance = calculate_loss_from_output(
-                bandgap_pred=bandgap_onehot,
-                ef_pred=ef_onehot,
-                sharpened_ox_mask=onehot_ox_mask,
-                normalized_dist= onehot_x,
-                site_ids=optimized_mini_batch_inputs_dict['site_ids'].to(device),
-                gap_loss_func=gap_loss_func,
-                tolerance_loss_func=tolerance_loss_func,
-                ef_coef=e_form_coef,
-                e_form_min=e_form_min,
-                crystal_system=crystal_system,
-                radii_tensor=radii_tensor,
+            _, base_onehot, loss_onehot, _, tolerance_loss, tolerance = (
+                calculate_loss_from_output(
+                    bandgap_pred=bandgap_onehot,
+                    ef_pred=ef_onehot,
+                    sharpened_ox_mask=onehot_ox_mask,
+                    normalized_dist=onehot_x,
+                    site_ids=optimized_mini_batch_inputs_dict["site_ids"].to(device),
+                    gap_loss_func=gap_loss_func,
+                    tolerance_loss_func=tolerance_loss_func,
+                    ef_coef=e_form_coef,
+                    e_form_min=e_form_min,
+                    crystal_system=crystal_system,
+                    radii_tensor=radii_tensor,
+                )
             )
+    if force_pressure_on:
+        if loss_composer is not None:
+            _, base_onehot, _ = loss_composer.compute(pred_onehot, context)
+        elif not settings_dict.get("superhard_cfg"):
+            base_soft = legacy_base_soft
+
     # あとで消す
-    #print("onehot_atom_feat.shape", onehot_atom_feat.shape)
-    #print("onehot_atom_feat", onehot_atom_feat)
+    # print("onehot_atom_feat.shape", onehot_atom_feat.shape)
+    # print("onehot_atom_feat", onehot_atom_feat)
     VALID_ELEMENTS98 = create_element_list()
     print([VALID_ELEMENTS98[a_idx] for a_idx in np.argmax(onehot_x[-9:].detach().cpu().numpy(),axis=1)])
     print(batch_dir_coords[-9:].detach().cpu().numpy())
 
-
     pred_energy = None
-    if energy_module is not None:
+    if energy_module is not None and not force_pressure_on:
         size = optimized_mini_batch_inputs_dict["size"].to(device)
         batch_index = torch.repeat_interleave(
             torch.arange(len(size), device=device), size
@@ -270,6 +297,47 @@ def evaluation_for_each_batch_ALIGNN(
             + energy_coef * loss_energy
         )
 
+    final_physical = {}
+    if force_pressure_on:
+        if superhard_cfg is not None:
+            # Preserve the established superhard objective before adding new terms.
+            base_onehot = loss_total
+            soft_ratio = bandgap_dist / (ef_dist + k_eps)
+            soft_k = (
+                torch.relu(superhard_cfg["k_min"] - soft_ratio).square()
+                + torch.relu(soft_ratio - superhard_cfg["k_max"]).square()
+            )
+            base_soft = (
+                -superhard_cfg["G_coef"] * bandgap_dist
+                - superhard_cfg["B_coef"] * ef_dist
+                + superhard_cfg["k_coef"] * soft_k
+            )
+        size = optimized_mini_batch_inputs_dict["size"].to(device)
+        batch_index = torch.repeat_interleave(
+            torch.arange(len(size), device=device), size
+        )
+        positions = direct_to_cartesian_batch(
+            output_dict["normed_batch_dir_coords"],
+            output_dict["lattice_vectors"][batch_index],
+        )
+        final_physical = final_force_pressure(
+            energy_module,
+            force_pressure_config,
+            output_dict["normalized_dist"],
+            onehot_x,
+            positions,
+            output_dict["lattice_vectors"],
+            size,
+            base_soft,
+            base_onehot,
+            energy_coef,
+            optimized_mini_batch_inputs_dict.get("fnames"),
+        )
+        if "pred_energy" in final_physical:
+            pred_energy = final_physical["pred_energy"]
+            if superhard_cfg is not None:
+                loss_energy = pred_energy
+
     # 結果の記録
     optimized_mini_batch_inputs_dict = optimized_mini_batch_inputs_dict | output_dict
     optimized_mini_batch_inputs_dict['max_val'] = max_val
@@ -295,4 +363,5 @@ def evaluation_for_each_batch_ALIGNN(
         optimized_mini_batch_inputs_dict["loss_energy"] = loss_energy
         optimized_mini_batch_inputs_dict["loss_total"] = loss_total
 
+    optimized_mini_batch_inputs_dict.update(final_physical)
     return optimized_mini_batch_inputs_dict

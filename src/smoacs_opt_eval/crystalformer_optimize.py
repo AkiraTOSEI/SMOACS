@@ -42,9 +42,8 @@ def optimize_solution_Crystalformer(
     energy_coef: float = 0.0,
     energy_every: int = 1,
     use_element_count_l1_loss: bool = False,
-    element_count_l1_weight: float = 1.0,
+    element_count_l1_weight: float = 0.0,
     optimizer: str = "gradient",
-    wyckoff_expander: Optional[Any] = None,
 ):
     """
     Performs optimization of a batch of candidate crystal structures using Crystalformer.
@@ -76,9 +75,6 @@ def optimize_solution_Crystalformer(
             - time_series: List of history arrays for structural variables and predictions.
             - scalers: Updated scalers.
     """
-    if wyckoff_expander is not None:
-        raise NotImplementedError("Crystalformer does not support wyckoff_expander")
-
     abc_scaler = scalers["abc_scaler"]
     angle_scaler = scalers["angle_scaler"]
     if hasattr(abc_scaler, "base_length"):
@@ -149,6 +145,7 @@ def optimize_solution_Crystalformer(
     )
     abc_history, angle_history = [], []
     gap_history, e_form_history, t_loss_history = [], [], []
+    force_pressure_history = {}
     element_count_l1_history, element_count_l1_max_history = [], []
     VALID_ELEMENTS98 = create_element_list()
 
@@ -212,6 +209,7 @@ def optimize_solution_Crystalformer(
                 loss_composer=loss_composer,
                 primary_metrics=primary_metrics,
                 energy_module=energy_module,
+                force_pressure_config=settings_dict.get("force_pressure_config"),
                 energy_coef=energy_coef,
                 energy_every=energy_every,
                 step_i=step_i,
@@ -246,6 +244,10 @@ def optimize_solution_Crystalformer(
         )
 
         def _log_step(step_i, _state, current_eval, _best_eval, _stats):
+            for key, value in current_eval.get("force_pressure", {}).items():
+                force_pressure_history.setdefault(key, []).append(
+                    value.detach().cpu().reshape(-1)
+                )
             gap_history.append(
                 current_eval["bandgap_pred"].detach().cpu().numpy()
                 if current_eval["bandgap_pred"] is not None
@@ -341,6 +343,7 @@ def optimize_solution_Crystalformer(
                 loss_composer=loss_composer,
                 primary_metrics=primary_metrics,
                 energy_module=energy_module,
+                force_pressure_config=settings_dict.get("force_pressure_config"),
                 energy_coef=energy_coef,
                 energy_every=energy_every,
                 step_i=step_i,
@@ -388,7 +391,7 @@ def optimize_solution_Crystalformer(
                 learning_rates=learning_rates,
                 cry_atom_data=output_dict["batch"].detach(),
                 size=mini_batch_inputs_dict["size"].to(device),
-                wp_size=mini_batch_inputs_dict["wp_size"].to(device),
+                wp_size=mini_batch_inputs_dict["size"].to(device),
                 atomic_mask=mini_batch_inputs_dict["atomic_mask"],
                 ox_states_used_mask=mini_batch_inputs_dict["ox_states_used_mask"],
                 site_ids=mini_batch_inputs_dict["site_ids"].to(device),
@@ -422,30 +425,31 @@ def optimize_solution_Crystalformer(
             scheduler_coords = additional_info["scheduler_coords"]
 
             mini_batch_inputs_dict["batch"] = additional_info["new_cry_atom_data"].to(
-                "cuda"
-            )
-            mini_batch_inputs_dict["size"] = additional_info["new_size"].to(device)
-            mini_batch_inputs_dict["wp_size"] = additional_info["new_wp_size"].to(
                 device
             )
+            mini_batch_inputs_dict["size"] = additional_info["new_size"].to(device)
             mini_batch_inputs_dict["atomic_mask"] = additional_info["atomic_mask"].to(
-                "cuda"
+                device
             )
             mini_batch_inputs_dict["ox_states_used_mask"] = additional_info[
                 "ox_states_used_mask"
             ].to(device)
             mini_batch_inputs_dict["site_ids"] = additional_info["site_ids"].to(device)
             mini_batch_inputs_dict["radii_tensor"] = additional_info["radii_tensor"].to(
-                "cuda"
+                device
             )
             mini_batch_inputs_dict["init_coords"] = additional_info["init_coords"].to(
-                "cuda"
+                device
             )
 
             scalers["abc_scaler"] = additional_info["abc_scaler"]
             abc_scaler = additional_info["abc_scaler"]
 
             # 損失の記録
+            for key, value in eval_out.get("force_pressure", {}).items():
+                force_pressure_history.setdefault(key, []).append(
+                    value.detach().cpu().reshape(-1)
+                )
             gap_history.append(bandgap_pred.detach().cpu().numpy())
             e_form_history.append(ef_pred.detach().cpu().numpy())
             t_loss_history.append(tolerance.detach().cpu().numpy())
@@ -454,7 +458,7 @@ def optimize_solution_Crystalformer(
             )
             element_count_l1_max_history.append(
                 per_crystal_loss.detach().cpu().max().item()
-                if use_element_count_l1_loss
+                if (use_element_count_l1_loss or element_count_l1_weight != 0.0)
                 else 0.0
             )
 
@@ -493,6 +497,7 @@ def optimize_solution_Crystalformer(
             loss_composer=loss_composer,
             primary_metrics=primary_metrics,
             energy_module=energy_module,
+            force_pressure_config=settings_dict.get("force_pressure_config"),
             energy_coef=energy_coef,
             energy_every=energy_every,
             step_i=num_steps - 1,
@@ -525,14 +530,16 @@ def optimize_solution_Crystalformer(
         ox_mask_learnable_tensor_per_crystal
     )
     optimized_mini_batch_inputs_dict["batch_dir_coords"] = batch_dir_coords
+    for key, values in force_pressure_history.items():
+        optimized_mini_batch_inputs_dict[f"{key}_history"] = torch.stack(values, dim=1)
     optimized_mini_batch_inputs_dict["gap_history"] = np.transpose(
-        np.array(gap_history).squeeze(), (1, 0)
+        np.array(gap_history).reshape(len(gap_history), -1), (1, 0)
     )
     optimized_mini_batch_inputs_dict["ef_history"] = np.transpose(
-        np.array(e_form_history).squeeze(), (1, 0)
+        np.array(e_form_history).reshape(len(e_form_history), -1), (1, 0)
     )
     optimized_mini_batch_inputs_dict["t_history"] = np.transpose(
-        np.array(t_loss_history).squeeze(), (1, 0)
+        np.array(t_loss_history).reshape(len(t_loss_history), -1), (1, 0)
     )
     optimized_mini_batch_inputs_dict["element_count_l1_history"] = (
         element_count_l1_history

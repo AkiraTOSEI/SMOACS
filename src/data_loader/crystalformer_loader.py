@@ -1,5 +1,4 @@
 import copy
-import glob
 import os
 from typing import Any, Dict, List, Optional, Tuple
 import pickle
@@ -12,6 +11,7 @@ from jarvis.core.atoms import Atoms
 from src.utils.mask_utils import create_learnable_oxides_mask
 from src.utils.oxidation import get_atom_masks_for_oxidation_states
 from src.utils.scalers import ABC_Scaler, Angle_Scaler
+from src.utils.structure_paths import get_structure_paths
 
 
 def pickup_candidates_crystalformer(
@@ -50,7 +50,6 @@ def pickup_candidates_crystalformer(
     batch = crystalformer_all_inputs_dict["batch"]
     coords4input = crystalformer_all_inputs_dict["coords4input"]
     size = crystalformer_all_inputs_dict["size"]
-    wp_size = crystalformer_all_inputs_dict["wp_size"]
     abc = crystalformer_all_inputs_dict["abc"]
     angles = crystalformer_all_inputs_dict["angles"]
     atomic_mask = crystalformer_all_inputs_dict["atomic_mask"]
@@ -75,7 +74,6 @@ def pickup_candidates_crystalformer(
     selected_abc = abc[selected_ids]
     selected_angles = angles[selected_ids]
     selected_size = size[selected_ids]
-    selected_wp_size = wp_size[selected_ids]
     selected_fnames = fnames[selected_ids]
 
     if atomic_mask is not None:
@@ -99,7 +97,6 @@ def pickup_candidates_crystalformer(
         "batch": selected_batch,
         "batch_dir_coords": selected_coords4input,
         "size": selected_size,
-        "wp_size": selected_wp_size,
         "batch_abc": selected_abc,
         "batch_angle": selected_angles,
         "init_coords": copy.deepcopy(selected_coords4input),
@@ -151,8 +148,6 @@ def create_crystalformer_init_structure_from_directory(
     mask_method: str,
     mask_dict_path: Optional[str],
     crystal_system: Optional[str],
-    initial_dataset: str,
-    ox_solution_mode: str = "strict_unique",
     num_candidate: Optional[int] = None,
 ) -> Tuple[
     torch.Tensor,  # abc
@@ -248,7 +243,7 @@ def create_crystalformer_init_structure_from_directory(
         site_ids_list,
     ) = [], [], [], []
     num_total_crystals = 0
-    file_paths = glob.glob(os.path.join(dir_path, "*.vasp"))
+    file_paths = get_structure_paths(dir_path)
     for cry_i, path in enumerate(file_paths):
         atoms = Atoms.from_poscar(path)
         batch_list.append(
@@ -270,10 +265,8 @@ def create_crystalformer_init_structure_from_directory(
             mask_d=mask_d,
             radii_d=radii_d,
             max_ox_states=max_ox_states,
-            initial_dataset=initial_dataset,
             crystal_system=crystal_system,
             mask_name=Path(mask_dict_path).name if mask_dict_path else None,
-            ox_solution_mode=ox_solution_mode,
         )
         atom_mask_for_all_ox_states_list.append(_atom_mask_for_all_ox_states)
         radii_for_all_ox_states_list.append(_radii_for_all_ox_states)
@@ -471,8 +464,6 @@ def load_crystalformer_initial_data(
     intermid_dir_path: str,
     mask_dict_path: Optional[str],
     crystal_system: Optional[str],
-    initial_dataset: str,
-    ox_solution_mode: str,
     batch_size: int,
     use_atomic_mask: bool,
     max_ox_states: int,
@@ -521,8 +512,6 @@ def load_crystalformer_initial_data(
             intermid_dir_path=intermid_dir_path,
             max_ox_states=max_ox_states,
             crystal_system=crystal_system,
-            initial_dataset=initial_dataset,
-            ox_solution_mode=ox_solution_mode,
             num_candidate=num_candidate,
             mask_method=mask_method,
             mask_dict_path=mask_dict_path,

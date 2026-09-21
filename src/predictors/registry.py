@@ -40,6 +40,7 @@ def build_predictors(predictor_configs: List[Dict[str, Any]], device: str) -> Di
                 task=task,
                 layer=layer,
                 weight_path_dir=weight_path_dir,
+                device=device,
             )
             model = model.to(device)
             predictors[name] = CrystalformerPredictor(

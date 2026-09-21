@@ -8,11 +8,13 @@ from src.utils.common import get_master_dir
 
 
 def load_pretrained_crystalformer(
-    task: str, layer: int, weight_path_dir: str
+    task: str, layer: int, weight_path_dir: str, device: str = "cuda"
 ) -> torch.nn.Module:
     weight_path = os.path.join(weight_path_dir, f"megnet-{task}-layer{layer}.ckpt")
     config_path = os.path.join(weight_path_dir, "default.json")
     params = Params(config_path)
+    if torch.device(device).type == "cpu":
+        params.use_cuda_code = False
     model = Latticeformer(params)
     ##
     ## モデルの重み読み込み
@@ -21,7 +23,7 @@ def load_pretrained_crystalformer(
     model = Latticeformer(params)
 
     with open(weight_path, "rb") as f:
-        ckeckpoint = torch.load(f)
+        ckeckpoint = torch.load(f, map_location="cpu")
         state_dict = ckeckpoint["state_dict"]
         target_std = ckeckpoint["state_dict"]["target_std"]
         target_mean = ckeckpoint["state_dict"]["target_mean"]
@@ -45,16 +47,18 @@ def load_pretrained_crystalformer(
     return model
 
 
-def Load_Pretrained_Crystalformers():
+def Load_Pretrained_Crystalformers(device: str = "cuda"):
     # モデルの読み込み
     bandgap_model = load_pretrained_crystalformer(
         task="bandgap",  # 'e_form' or 'bandgap'
         layer=4,
         weight_path_dir=os.path.join(get_master_dir(), f"models/crystalformer"),
-    ).to("cuda")
+        device=device,
+    ).to(device)
     e_form_model = load_pretrained_crystalformer(
         task="e_form",  # 'e_form' or 'bandgap'
         layer=4,
         weight_path_dir=os.path.join(get_master_dir(), f"models/crystalformer"),
-    ).to("cuda")
+        device=device,
+    ).to(device)
     return bandgap_model, e_form_model

@@ -1,7 +1,6 @@
-import glob
-import json
 import os
 from typing import Any, Dict, List, Optional, Tuple
+import os
 import pickle
 from pathlib import Path
 
@@ -15,10 +14,28 @@ from periodictable import elements as pd_elements
 from src.graph.graph_utils import get_torch_dataset, graph_to_tensors
 from src.utils.oxidation import get_atom_masks_for_oxidation_states
 from src.utils.scalers import ABC_Scaler, Angle_Scaler
+from src.utils.structure_paths import get_structure_paths
 from src.spg_wp.wyckoff_expander import WyckoffExpander
 from src.utils.coord import compute_lattice_vectors
-from src.utils.common import create_element_list
 from src.preprocess.prepro_utils import compute_normalized_dist_and_ox_mask
+
+
+GRAPH_GEOMETRY_KEYS = ("lattice_mat", "coords", "abc", "angles")
+
+
+def _valid_graph_geometry(geometry):
+    coords = np.asarray(geometry["coords"])
+    if coords.ndim != 2 or coords.shape[1] != 3:
+        return False
+    if any(
+        np.shape(geometry[key]) != shape
+        for key, shape in (("lattice_mat", (3, 3)), ("abc", (3,)), ("angles", (3,)))
+    ):
+        return False
+    if not all(np.isfinite(geometry[key]).all() for key in GRAPH_GEOMETRY_KEYS):
+        return False
+    determinant = np.linalg.det(np.asarray(geometry["lattice_mat"], dtype=np.float64))
+    return np.isfinite(determinant) and abs(determinant) > 0
 
 
 def tensor_to_numpy(tensor: torch.Tensor) -> np.ndarray:
@@ -73,7 +90,6 @@ def fill_nan_by_key(arr: np.ndarray, key: str) -> np.ndarray:
     return np.where(np.isnan(arr), fill, arr)
 
 
-
 def to_numpy_fill_nan(tensor_dict: Dict[str, torch.Tensor], key: str) -> np.ndarray:
     """Convert ``tensor_dict[key]`` to NumPy and fill NaNs based on *key*.
 
@@ -95,7 +111,6 @@ def to_numpy_fill_nan(tensor_dict: Dict[str, torch.Tensor], key: str) -> np.ndar
     return fill_nan_by_key(arr, key)
 
 
-
 def build_dataset_for_graph(
     optimized_mini_batch_inputs_dict: Dict[str, torch.Tensor],
     wyckoff_expander: Optional[WyckoffExpander],
@@ -112,9 +127,19 @@ def build_dataset_for_graph(
         List[Dict[str, Any]]: A list of graph input dictionaries for each structure.
     """
     # Extract arrays using a utility function
-    wp_dir_coords = to_numpy_fill_nan(optimized_mini_batch_inputs_dict, 'batch_dir_coords')
-    abc = to_numpy_fill_nan(optimized_mini_batch_inputs_dict, 'batch_abc')
-    angle = to_numpy_fill_nan(optimized_mini_batch_inputs_dict, 'batch_angle')
+    if wyckoff_expander is None:
+        # Keep invalid geometry visible so the entire candidate can be restored.
+        wp_dir_coords = tensor_to_numpy(
+            optimized_mini_batch_inputs_dict["batch_dir_coords"]
+        )
+        abc = tensor_to_numpy(optimized_mini_batch_inputs_dict["batch_abc"])
+        angle = tensor_to_numpy(optimized_mini_batch_inputs_dict["batch_angle"])
+    else:
+        wp_dir_coords = to_numpy_fill_nan(
+            optimized_mini_batch_inputs_dict, "batch_dir_coords"
+        )
+        abc = to_numpy_fill_nan(optimized_mini_batch_inputs_dict, "batch_abc")
+        angle = to_numpy_fill_nan(optimized_mini_batch_inputs_dict, "batch_angle")
     lattice_vectors = compute_lattice_vectors(torch.tensor(abc), torch.tensor(angle))
     lattice_vectors = lattice_vectors.detach().cpu().numpy()
     size = to_numpy_fill_nan(optimized_mini_batch_inputs_dict, 'size')
@@ -218,6 +243,29 @@ def build_dataset_for_graph(
             'ox_states_used_mask': ox_mask_tensor.detach().cpu().numpy(),
         }
 
+        if wyckoff_expander is None and not _valid_graph_geometry(data_dict["atoms"]):
+            refs = optimized_mini_batch_inputs_dict.get("graph_fallback_geometry")
+            jid = data_dict["jid"]
+            if refs is None or len(refs) != len(size):
+                raise ValueError(
+                    f"{jid}: missing or incomplete graph fallback geometry"
+                )
+            ref = refs[cry_i]
+            if not _valid_graph_geometry(ref) or np.shape(ref["coords"]) != (
+                int(num_atoms),
+                3,
+            ):
+                raise ValueError(
+                    f"{jid}: invalid graph fallback geometry: expected_atoms={num_atoms}, "
+                    f"reference_coords_shape={np.shape(ref['coords'])}"
+                )
+            for key in GRAPH_GEOMETRY_KEYS:
+                data_dict["atoms"][key] = np.array(ref[key], copy=True)
+            print(
+                f"graph geometry restored: {jid}, source={ref['source_jid']}, "
+                f"atoms={num_atoms}, reason=nonfinite_or_degenerate_geometry"
+            )
+
         if wyckoff_expander is not None:
             data_dict['wp_coords'] = wp_dir_coords[wp_cry_bool]
             data_dict['test_coords'] = coords # debug
@@ -243,12 +291,10 @@ def create_ALIGNN_init_structure_from_directory(
     mask_method :str,
     mask_dict_path: Optional[str] = None,
     crystal_system:Optional[str] = None,
-    initial_dataset:str = "megnet",
-    ox_solution_mode:str = "strict_unique",
     num_candidate:Optional[int] = None,
     graph_update_mode:bool = False,
     ):
-    
+
     print("<info> load initial structures from", dir_path)
     if crystal_system is None:
         print("<info> crystal_system is None")
@@ -274,7 +320,7 @@ def create_ALIGNN_init_structure_from_directory(
 
     dataset_optimize = []
     num_total_crystals = 0
-    file_paths = glob.glob(os.path.join(dir_path, '*.vasp'))
+    file_paths = get_structure_paths(dir_path)
     for path in file_paths:
         atoms = Atoms.from_poscar(path)
 
@@ -284,10 +330,8 @@ def create_ALIGNN_init_structure_from_directory(
             radii_d=radii_d,
             max_ox_states=max_ox_states,
             crystal_system=crystal_system,
-            initial_dataset=initial_dataset,
             graph_update_mode=graph_update_mode,
             mask_name=Path(mask_dict_path).name if mask_dict_path else None,
-            ox_solution_mode=ox_solution_mode,
         ) 
         dataset_optimize.append({
             'jid':os.path.basename(path),
@@ -311,7 +355,7 @@ def create_ALIGNN_init_structure_from_directory(
 
     if num_candidate is not None:
         dataset_optimize = dataset_optimize[:num_candidate]
-        
+
     num_total_crystals = len(dataset_optimize)
     return dataset_optimize, num_total_crystals
 
@@ -320,167 +364,15 @@ def _is_pkl_path(path: str) -> bool:
     return Path(path).is_file() and Path(path).suffix == ".pkl"
 
 
-def _resize_last_dim(arr: np.ndarray, target: int) -> np.ndarray:
-    current = int(arr.shape[-1])
-    if current == target:
-        return arr
-    if current > target:
-        return arr[..., :target]
-    pad_shape = arr.shape[:-1] + (target - current,)
-    pad = np.zeros(pad_shape, dtype=arr.dtype)
-    return np.concatenate([arr, pad], axis=-1)
-
-
-def _adjust_precomputed_ox_pattern_width(
-    data_list: List[Dict[str, Any]],
-    max_ox_states: int,
-) -> None:
-    if not data_list:
-        return
-
-    keys = (
-        "atom_mask_for_all_ox_states",
-        "radii_for_all_ox_states",
-        "ox_states_used_mask",
-    )
-    target = int(max_ox_states)
-
-    for row in data_list:
-        for key in keys:
-            value = row.get(key)
-            if value is None:
-                continue
-            arr = np.asarray(value)
-            if arr.ndim == 0:
-                continue
-            row[key] = _resize_last_dim(arr, target)
-
-
-def _forbidden_indices_from_mask_dict(mask_dict_path: Optional[str]) -> List[int]:
-    if mask_dict_path is None:
-        return []
-
-    path = Path(mask_dict_path).expanduser().resolve()
-    if not path.is_file() or path.suffix != ".npz":
-        raise ValueError(f"mask_dict_path must be a .npz file: {path}")
-
-    sidecar_path = path.with_suffix(".json")
-    if sidecar_path.is_file():
-        meta = json.loads(sidecar_path.read_text(encoding="utf-8"))
-        if "forbidden_elements" in meta:
-            forbidden_elements = meta["forbidden_elements"]
-            if not isinstance(forbidden_elements, list):
-                raise ValueError(
-                    "Generated mask sidecar forbidden_elements must be a list: "
-                    f"{sidecar_path}"
-                )
-            element_to_index = {
-                symbol: idx for idx, symbol in enumerate(create_element_list())
-            }
-            indices = []
-            for symbol in forbidden_elements:
-                if symbol not in element_to_index:
-                    raise ValueError(
-                        "Unknown forbidden element in generated mask sidecar: "
-                        f"{symbol}"
-                    )
-                indices.append(element_to_index[symbol])
-            return sorted(set(indices))
-
-    masks = []
-    with np.load(path, allow_pickle=True) as mask_npz:
-        if not mask_npz.files:
-            raise ValueError(f"Empty mask dictionary: {path}")
-        for key in mask_npz.files:
-            mask = np.asarray(mask_npz[key])
-            if mask.shape != (98,):
-                raise ValueError(
-                    f"Unexpected mask shape for key {key} in {path}: {mask.shape}"
-                )
-            masks.append(mask)
-
-    stacked = np.stack(masks, axis=0)
-    return np.where(np.all(stacked == 0, axis=0))[0].astype(int).tolist()
-
-
-def _apply_forbidden_indices_to_precomputed_masks(
-    data_list: List[Dict[str, Any]],
-    forbidden_indices: List[int],
-    mask_dict_path: Optional[str],
-) -> None:
-    if not forbidden_indices:
-        return
-
-    keys = (
-        "atom_mask_for_all_ox_states",
-        "radii_for_all_ox_states",
-    )
-    for row_idx, row in enumerate(data_list):
-        for key in keys:
-            value = row.get(key)
-            if value is None:
-                continue
-            arr = np.array(value, copy=True)
-            if arr.ndim != 3 or arr.shape[1] != 98:
-                raise ValueError(
-                    f"{key} in pkl record {row_idx} must have shape "
-                    f"(num_sites, 98, max_ox_states), got {arr.shape}. "
-                    f"mask_dict_path={mask_dict_path}"
-                )
-            arr[:, forbidden_indices, :] = 0
-            row[key] = arr
-
-
-def _validate_info_pkl_records(
-    data_list: List[Dict[str, Any]],
-    pkl_path: str,
-) -> None:
-    required_keys = {
-        "atoms",
-        "dummy_target",
-        "jid",
-        "elements",
-        "atom_mask_for_all_ox_states",
-        "radii_for_all_ox_states",
-        "ox_states_used_mask",
-        "site_ids",
-    }
-    for idx, item in enumerate(data_list):
-        if not isinstance(item, dict):
-            raise ValueError(f"Expected dict item in pkl at index {idx}: {pkl_path}")
-        missing = required_keys - set(item.keys())
-        if missing:
-            raise ValueError(
-                f"Missing keys in info pkl item {idx} ({pkl_path}): {sorted(missing)}"
-            )
-
-
 def create_ALIGNN_init_structure_from_pkl(
     pkl_path: str,
-    max_ox_states: int,
     num_candidate: Optional[int] = None,
-    mask_dict_path: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     with open(pkl_path, "rb") as f:
         data = pickle.load(f)
 
-    forbidden_indices = _forbidden_indices_from_mask_dict(mask_dict_path)
-
-    if isinstance(data, pd.DataFrame):
-        dataset_optimize = data.to_dict(orient="records")
-        if num_candidate is not None:
-            dataset_optimize = dataset_optimize[:num_candidate]
-        _validate_info_pkl_records(dataset_optimize, pkl_path)
-        _adjust_precomputed_ox_pattern_width(dataset_optimize, max_ox_states)
-        _apply_forbidden_indices_to_precomputed_masks(
-            dataset_optimize, forbidden_indices, mask_dict_path
-        )
-        return dataset_optimize
-
     if not isinstance(data, list):
-        raise ValueError(
-            f"Expected list or pandas.DataFrame in pkl file: {pkl_path}"
-        )
+        raise ValueError(f"Expected list in pkl file: {pkl_path}")
 
     dataset_optimize = []
     required_keys = {
@@ -534,9 +426,6 @@ def create_ALIGNN_init_structure_from_pkl(
     if num_candidate is not None:
         dataset_optimize = dataset_optimize[:num_candidate]
 
-    _apply_forbidden_indices_to_precomputed_masks(
-        dataset_optimize, forbidden_indices, mask_dict_path
-    )
     return dataset_optimize
 
 
@@ -551,8 +440,6 @@ def load_ALIGNN_initial_data(
         max_ox_states:int,
         mask_method:str,
         crystal_system:Optional[str],
-        initial_dataset:str,
-        ox_solution_mode:str,
         angle_range:Tuple[float,float],
         abc_range:Tuple[float,float],
         wyckoff_expander:Optional[WyckoffExpander],
@@ -600,14 +487,11 @@ def load_ALIGNN_initial_data(
         each consisting of (input_tensor_dict, scaler_dict).
     """
 
-    
     if intermid_data_dict is None and input_dataframe is None:
         if _is_pkl_path(dir_path):
             dataset_optimize = create_ALIGNN_init_structure_from_pkl(
                 pkl_path=dir_path,
-                max_ox_states=max_ox_states,
                 num_candidate=num_candidate,
-                mask_dict_path=mask_dict_path,
             )
         else:
             dataset_optimize, _ = create_ALIGNN_init_structure_from_directory(
@@ -618,8 +502,6 @@ def load_ALIGNN_initial_data(
                 num_candidate=num_candidate,
                 mask_method=mask_method,
                 mask_dict_path=mask_dict_path,
-                initial_dataset=initial_dataset,
-                ox_solution_mode=ox_solution_mode,
                 graph_update_mode = graph_update_mode,
             )
     elif intermid_data_dict is None and input_dataframe is not None:
@@ -633,7 +515,6 @@ def load_ALIGNN_initial_data(
         )
     else:
         raise Exception("intermid_data_dict is not None, but graph_update_mode is False. This is not supported yet.")
-    
 
     train_data, train_df = get_torch_dataset(
         dataset=dataset_optimize,
@@ -655,18 +536,16 @@ def load_ALIGNN_initial_data(
         tmp_name="train_data",
     )
 
-
     num_workers = int(os.getenv("SMOACS_DATALOADER_WORKERS", "4"))
     train_loader = DataLoader(
         train_data,
         batch_size=batch_size,
         shuffle=False,
         collate_fn=train_data.collate_line_graph,
-        drop_last=True,
+        drop_last=False,
         num_workers=num_workers,
         pin_memory=True,
-    ) 
-
+    )
 
     ALIGNN_all_inputs = []
     for i, g_x in enumerate(train_loader):
@@ -676,9 +555,15 @@ def load_ALIGNN_initial_data(
         g = g.local_var()
         lg = lg.local_var()
         # initial node features: atom feature network...
-        g.ndata.pop("atom_features")
-        g.edata.pop("r")
-        lg.edata.pop("h")
+        atom_features = g.ndata.pop("atom_features")
+        bondlength = torch.norm(g.edata.pop("r"), dim=1)
+        angle_features = lg.edata.pop("h")
+
+        data_dict_for_test = {
+            'atom_features':atom_features,
+            'bondlength':bondlength,
+            'angle_features':angle_features,
+        }
 
         alignn_minibatch_dict = graph_to_tensors(
             g=g, 
@@ -689,6 +574,33 @@ def load_ALIGNN_initial_data(
             #test_mode=test_mode
             wyckoff_expander = wyckoff_expander
         )
+
+        if not graph_update_mode and wyckoff_expander is None:
+            batch_df = train_df.iloc[i * batch_size : (i + 1) * batch_size]
+            refs = []
+            for crystal_i, (_, row) in enumerate(batch_df.iterrows()):
+                ref = {
+                    "source_jid": row["jid"],
+                    **{
+                        key: np.array(row["atoms"][key], copy=True)
+                        for key in GRAPH_GEOMETRY_KEYS
+                    },
+                }
+                # Atom masks use the original site order; normalize only the coordinate basis.
+                ref["coords"] = np.array(
+                    Atoms.from_dict(row["atoms"]).frac_coords, copy=True
+                )
+                num_atoms = int(alignn_minibatch_dict["size"][crystal_i])
+                if not _valid_graph_geometry(ref) or ref["coords"].shape != (
+                    num_atoms,
+                    3,
+                ):
+                    raise ValueError(
+                        f"{row['jid']}: invalid initial graph geometry: expected_atoms={num_atoms}, "
+                        f"reference_coords_shape={ref['coords'].shape}"
+                    )
+                refs.append(ref)
+            alignn_minibatch_dict["graph_fallback_geometry"] = refs
 
         scalers = {
             "abc_scaler": ABC_Scaler(
@@ -706,8 +618,7 @@ def load_ALIGNN_initial_data(
         ALIGNN_all_inputs.append(
             [alignn_minibatch_dict, scalers]
         )
-        #if i*batch_size>=num_total:
+        # if i*batch_size>=num_total:
         #    break
-
 
     return ALIGNN_all_inputs

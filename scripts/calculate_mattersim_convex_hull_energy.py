@@ -34,16 +34,10 @@ import traceback
 import typing
 from typing import List, Tuple, Sequence, Optional, Union, Iterable
 from tqdm.auto import tqdm
-
 if not hasattr(typing, "NotRequired"):
-    try:
-        from typing_extensions import NotRequired as _NotRequired
-    except ImportError as exc:
-        raise ImportError(
-            "mp_api/emmet requires typing.NotRequired on Python 3.10. "
-            "Install typing_extensions or use Python >=3.11."
-        ) from exc
-    typing.NotRequired = _NotRequired
+    from typing_extensions import NotRequired
+
+    typing.NotRequired = NotRequired
 
 from mp_api.client import MPRester
 from pymatgen.io.ase import AseAtomsAdaptor
@@ -81,7 +75,10 @@ DEFAULT_RELAX_DB_PATH = (
 GLOBAL_RELAX_DIR = DEFAULT_RELAX_DB_PATH.parent
 DEFAULT_CACHE_DIR = Path.cwd() / "cache"
 FETCH_EHULL_DB_THRES = 0.3
+MP_MISSING_EHULL_MAX_SITES = 10
 CREATE_DFT_NEEDED_THRES = 0.1
+MP_PREFETCH_MAX_ELEMENTS = 9
+MP_PREFETCH_ELEMENT_LIMIT_REASON = "mp_prefetch_element_limit"
 
 
 def _resolve_relax_record_path(path_value: Union[str, Path]) -> Path:
@@ -90,7 +87,7 @@ def _resolve_relax_record_path(path_value: Union[str, Path]) -> Path:
     if path.exists():
         return path
     path_str = str(path_value)
-    marker = f"{os.sep}SMOACS{os.sep}"
+    marker = f"{os.sep}polar_SMOACS{os.sep}"
     if marker in path_str:
         suffix = path_str.split(marker, 1)[1]
         candidate = REPO_ROOT / suffix
@@ -99,7 +96,15 @@ def _resolve_relax_record_path(path_value: Union[str, Path]) -> Path:
     return path
 
 
+# ### Alexander's Materials Project API key
+
+# In[4]:
+
+
 from pymatgen.core import Lattice, Structure as PmgStructure
+
+
+# In[5]:
 
 
 from itertools import combinations
@@ -831,13 +836,15 @@ def fetch_mp_structures(
     max_n: Optional[int] = None,
     ehull_max: float = FETCH_EHULL_DB_THRES,
     cache_dir: Path = DEFAULT_CACHE_DIR,
-) -> List[Tuple[str, Structure, float]]:
+) -> List[Tuple[str, Structure, Optional[float]]]:
     """
     Fetch (material_id, Structure, e_hull) tuples from the Materials Project
     for a given chemical system, keeping only entries whose MP-reported energy
     above the convex hull is below ``ehull_max`` (default: 0.3 eV/atom).
     Uses MP's public energy_above_hull values (Summary docs) and includes
-    lower-order subsets from the requested chemical system.
+    lower-order subsets from the requested chemical system. Elemental structures
+    with missing public E_hull are also included when they have at most 10 sites;
+    their E_hull remains None.
 
     Parameters
     ----------
@@ -853,24 +860,34 @@ def fetch_mp_structures(
 
     Returns
     -------
-    list[tuple[str, Structure, float]]
-        List of ``(material_id, Structure, e_hull)`` that satisfy the hull criterion.
+    list[tuple[str, Structure, Optional[float]]]
+        List of ``(material_id, Structure, e_hull)`` satisfying the hull criterion
+        or the missing-E_hull elemental size criterion. Missing values are None.
     """
+
     def _summary_field(doc, key):
         if isinstance(doc, dict):
             return doc.get(key)
         return getattr(doc, key, None)
 
-    with MPRester(api_key) as mpr:
+    elements = sorted(set(chemsys))
+    subsystems = [
+        "-".join(combo)
+        for size in range(1, len(elements) + 1)
+        for combo in combinations(elements, size)
+    ]
+    with MPRester(api_key, monty_decode=False, use_document_model=False) as mpr:
         # Retrieve all thermo entries for the chemsys (includes subsets).
         fetch_start = time.time()
-        entries = mpr.get_entries_in_chemsys(
-            chemsys,
-            additional_criteria={
-                "thermo_types": ["GGA_GGA+U", "R2SCAN", "GGA_GGA+U_R2SCAN"],
-            },
-            inc_structure=False,
+        # Read raw entries; only their material IDs are needed here.
+        # Use API spelling directly; older clients do not translate R2SCAN.
+        thermo_docs = mpr.materials.thermo._search(
+            chemsys=",".join(subsystems),
+            thermo_types="GGA_GGA+U,r2SCAN,GGA_GGA+U_R2SCAN",
+            all_fields=False,
+            fields=["entries"],
         )
+        entries = [entry for doc in thermo_docs for entry in doc["entries"].values()]
         _append_timing(
             "mp_entries_fetch",
             time.time() - fetch_start,
@@ -881,11 +898,9 @@ def fetch_mp_structures(
 
         material_ids: List[str] = []
         for entry in entries:
-            material_id = None
-            if hasattr(entry, "data"):
-                material_id = entry.data.get("material_id")
+            material_id = (entry.get("data") or {}).get("material_id")
             if not material_id:
-                material_id = getattr(entry, "entry_id", None)
+                material_id = entry.get("entry_id")
             if material_id:
                 material_ids.append(str(material_id))
 
@@ -908,6 +923,24 @@ def fetch_mp_structures(
                 )
             )
             summary_docs.extend(docs)
+        # Thermo can omit materials that still have structures in summary.
+        elemental_docs = _retry(
+            lambda: mpr.materials.summary.search(
+                chemsys=elements,
+                num_sites=(1, MP_MISSING_EHULL_MAX_SITES),
+                deprecated=False,
+                fields=["material_id", "structure", "energy_above_hull"],
+            )
+        )
+        seen_summary_ids = {_summary_field(doc, "material_id") for doc in summary_docs}
+        for doc in elemental_docs:
+            mid = _summary_field(doc, "material_id")
+            if (
+                mid not in seen_summary_ids
+                and _summary_field(doc, "energy_above_hull") is None
+            ):
+                summary_docs.append(doc)
+                seen_summary_ids.add(mid)
         _append_timing(
             "mp_summary_fetch",
             time.time() - summary_start,
@@ -916,37 +949,46 @@ def fetch_mp_structures(
             pid=os.getpid(),
         )
 
-        filtered = [
-            d
-            for d in summary_docs
-            if _summary_field(d, "energy_above_hull") is not None
-            and float(_summary_field(d, "energy_above_hull")) <= ehull_max
-        ]
-        filtered.sort(key=lambda d: float(_summary_field(d, "energy_above_hull")))
-
-        # Respect the max_n limit (after E_hull filtering)
-        if max_n is not None:
-            filtered = filtered[:max_n]
-
-        # Finally obtain the relaxed crystal structures
-        # structures: List[Tuple[str, Structure]] = [
-        #    (mid, mpr.get_structure_by_material_id(mid)) for mid in stable_ids
-        # ]
-
-        structures: List[Tuple[str, Structure, float]] = []
+        structures: List[Tuple[str, Structure, Optional[float]]] = []
         struct_start = time.time()
-        for d in filtered:
+        for d in summary_docs:
+            e_hull = _summary_field(d, "energy_above_hull")
+            if e_hull is not None and not float(e_hull) <= ehull_max:
+                continue
             mid = _summary_field(d, "material_id")
             if mid is None:
                 continue
             struct = _summary_field(d, "structure")
             if struct is None:
                 continue
-            e_hull = _summary_field(d, "energy_above_hull")
-            if e_hull is None:
+            struct = Structure.from_dict(struct)
+            if e_hull is None and (
+                len(struct.symbol_set) != 1
+                or not set(struct.symbol_set).issubset(elements)
+                or not 1 <= len(struct) <= MP_MISSING_EHULL_MAX_SITES
+            ):
                 continue
-            structures.append((str(mid), struct, float(e_hull)))
+            # MP keeps numeric IDs through 3347529; newer IDs remain alphabetical.
+            prefix, _, suffix = str(mid).partition("-")
+            if prefix == "mp" and suffix and all("a" <= char <= "z" for char in suffix):
+                numeric_id = 0
+                for char in suffix:
+                    numeric_id = numeric_id * 26 + ord(char) - ord("a")
+                if numeric_id <= 3347529:
+                    mid = f"mp-{numeric_id}"
+            structures.append(
+                (str(mid), struct, float(e_hull) if e_hull is not None else None)
+            )
 
+        structures.sort(key=lambda item: float("inf") if item[2] is None else item[2])
+        if max_n is not None:
+            structures = structures[:max_n]
+        for mid, struct, e_hull in structures:
+            if e_hull is None:
+                print(
+                    f"[MP] {mid}: included elemental structure with {len(struct)} sites "
+                    f"(public E_hull missing; limit={MP_MISSING_EHULL_MAX_SITES})"
+                )
         _append_timing(
             "mp_structure_fetch",
             time.time() - struct_start,
@@ -1214,14 +1256,14 @@ def _read_jsonl(path: Path) -> List[dict]:
 
 
 def _has_cache_for_chemsys(cache_path: Path, target_chemsys: str) -> bool:
-    """Return True if mp_cache has at least one entry for target_chemsys."""
+    """Return True if the MP cache contains every required elemental reference."""
     if not cache_path.exists():
         return False
-    try:
-        entries = _load_cached_entries(cache_path, "mp_entries", target_chemsys)
-        return len(entries) > 0
-    except Exception:
-        return False
+    entries = _load_cached_entries(cache_path, "mp_entries", target_chemsys)
+    terminal_elements = {
+        rec["entry_chemsys"] for rec in entries if "-" not in rec["entry_chemsys"]
+    }
+    return set(_elements_from_chemsys(target_chemsys)).issubset(terminal_elements)
 
 
 def _find_superset_done(target_chemsys: str, fetch_done: dict) -> List[str]:
@@ -1362,7 +1404,8 @@ def _query_signature_mp() -> str:
     payload = {
         "fetch_ehull_db_thres": FETCH_EHULL_DB_THRES,
         "thermo_types": ["GGA_GGA+U", "R2SCAN", "GGA_GGA+U_R2SCAN"],
-        "v": 1,
+        "missing_ehull_elemental_max_sites": MP_MISSING_EHULL_MAX_SITES,
+        "v": 2,
     }
     return hashlib.sha1(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
@@ -1667,31 +1710,17 @@ import shutil
 
 from pymatgen.core import Structure, Composition
 from pymatgen.entries.computed_entries import ComputedStructureEntry
-
-try:
-    from atomate2.vasp.flows.mp import MPGGADoubleRelaxStaticMaker
-except ImportError:
-    MPGGADoubleRelaxStaticMaker = None
+from atomate2.vasp.flows.mp import MPGGADoubleRelaxStaticMaker
 
 
 _RUN_PARAM_INPUT_SET_GENERATOR = None
-
-
-def _new_mp_gga_double_relax_static_maker():
-    if MPGGADoubleRelaxStaticMaker is None:
-        raise ImportError(
-            "atomate2 is required to recompute VASP run_params. "
-            "Install atomate2, or use --allow_run_params_fallback when existing "
-            "relax_results records already contain usable run_params."
-        )
-    return MPGGADoubleRelaxStaticMaker()
 
 
 def _get_run_param_input_set_generator():
     """Lazily initialize the MP input-set generator used for run_params."""
     global _RUN_PARAM_INPUT_SET_GENERATOR
     if _RUN_PARAM_INPUT_SET_GENERATOR is None:
-        flow_maker = _new_mp_gga_double_relax_static_maker()
+        flow_maker = MPGGADoubleRelaxStaticMaker()
         _RUN_PARAM_INPUT_SET_GENERATOR = flow_maker.static_maker.input_set_generator
     return _RUN_PARAM_INPUT_SET_GENERATOR
 
@@ -2154,7 +2183,7 @@ def collect_mp_alex_entries(
     outdir_path.mkdir(parents=True, exist_ok=True)
 
     # Hubbard U 等の情報を取得するための VASP 入力ジェネレータ
-    flow_maker = _new_mp_gga_double_relax_static_maker()
+    flow_maker = MPGGADoubleRelaxStaticMaker()
     static_maker = flow_maker.static_maker
     gen = static_maker.input_set_generator  # VaspInputGenerator
 
@@ -2391,7 +2420,6 @@ def relax_from_poscars(
     poscar_paths: Sequence[str | Path],
     steps_max: int = 400,
     outdir: Path | str = "poscar_relaxed",
-    allow_run_params_fallback: bool = False,
 ) -> List[Dict[str, str | float]]:
     """
     Relax a list of POSCAR/CONTCAR files with MatterSim and save the relaxed
@@ -2424,14 +2452,9 @@ def relax_from_poscars(
     outdir.mkdir(parents=True, exist_ok=True)
 
     # Hubbard U 等の情報を取得するための VASP 入力ジェネレータ
-    try:
-        flow_maker = _new_mp_gga_double_relax_static_maker()
-        static_maker = flow_maker.static_maker
-        gen = static_maker.input_set_generator  # VaspInputGenerator
-    except ImportError:
-        if not allow_run_params_fallback:
-            raise
-        gen = None
+    flow_maker = MPGGADoubleRelaxStaticMaker()
+    static_maker = flow_maker.static_maker
+    gen = static_maker.input_set_generator  # VaspInputGenerator
 
     results: List[Dict[str, str | float]] = []
     failure_list: List[str] = []
@@ -2447,13 +2470,10 @@ def relax_from_poscars(
         relax_start = time.time()
         try:
             # データに、Hubbard U などの情報を追加する
-            if gen is None:
-                run_params = {"run_type": "GGA", "is_hubbard": False, "hubbards": {}}
-            else:
-                vis = gen.get_input_set(struct, potcar_spec=True)
-                incar = vis.incar
-                elems = list(vis.poscar.site_symbols)
-                run_params = extract_params_from_vasp_input(incar, elems)
+            vis = gen.get_input_set(struct, potcar_spec=True)
+            incar = vis.incar
+            elems = list(vis.poscar.site_symbols)
+            run_params = extract_params_from_vasp_input(incar, elems)
 
             record = _relax_and_save_with_retry(
                 mp_id=mp_id,
@@ -2863,13 +2883,11 @@ def _ensure_prop_relaxed(
     poscar_path: Path,
     prop_relaxed_dir: Path,
     steps_max: int,
-    allow_run_params_fallback: bool = False,
 ) -> dict:
     records = relax_from_poscars(
         [poscar_path],
         steps_max=steps_max,
         outdir=prop_relaxed_dir,
-        allow_run_params_fallback=allow_run_params_fallback,
     )
     return records[0] if records else {}
 
@@ -3238,6 +3256,10 @@ def _compute_ehull_with_references(
     )
 
 
+def _exceeds_mp_element_limit(chemsys: str) -> bool:
+    return len(set(_elements_from_chemsys(chemsys))) > MP_PREFETCH_MAX_ELEMENTS
+
+
 def stage_prefetch_mp_spec(args) -> None:
     cache_dir = Path(args.cache_dir or DEFAULT_CACHE_DIR)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -3256,6 +3278,22 @@ def stage_prefetch_mp_spec(args) -> None:
     ordered_cs = _sort_chemsys_desc(chemsys_map.values())
     for cs in ordered_cs:
         cs_norm = _normalize_chemsys(cs)
+        if _exceeds_mp_element_limit(cs_norm):
+            print(
+                f"[Stage1] {cs_norm}: {MP_PREFETCH_ELEMENT_LIMIT_REASON}; "
+                "prefetch not attempted"
+            )
+            done += 1
+            _append_progress(
+                "stage1",
+                {
+                    "chemsys": cs_norm,
+                    "progress": f"{done}/{total_props}",
+                    "status": MP_PREFETCH_ELEMENT_LIMIT_REASON,
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                },
+            )
+            continue
         saved_path = GLOBAL_RELAX_DIR / f"relax_results_{cs_norm}.json.gz"
         if saved_path.exists():
             done += 1
@@ -3270,8 +3308,13 @@ def stage_prefetch_mp_spec(args) -> None:
             )
             continue
         # Superset skip: if a superset chemsys was fetched and cache has entries
-        supers = _find_superset_done(cs_norm, fetch_done)
-        if supers and _has_cache_for_chemsys(mp_cache_path, cs_norm):
+        supers = [
+            cs
+            for cs in _find_superset_done(cs_norm, fetch_done)
+            if fetch_done[cs].get("query_signature") == query_sig
+        ]
+        cache_complete = _has_cache_for_chemsys(mp_cache_path, cs_norm)
+        if supers and cache_complete:
             subs = _enumerate_subsystems(cs_norm)
             fetch_done[cs_norm] = {"subsystems": subs, "query_signature": query_sig}
             _save_fetch_done(fetch_done_path, fetch_done)
@@ -3287,7 +3330,7 @@ def stage_prefetch_mp_spec(args) -> None:
             )
             continue
         manifest = fetch_done.get(cs_norm)
-        if manifest and manifest.get("query_signature") == query_sig:
+        if manifest and manifest.get("query_signature") == query_sig and cache_complete:
             done += 1
             _append_progress(
                 "stage1",
@@ -3355,18 +3398,62 @@ def stage_phase1_spec(args) -> None:
     chemsys_to_fetch: set[str] = set()
     hull_done = 0
     total_props = len(poscars)
-    known_ids = _load_known_material_ids(DEFAULT_RELAX_DB_PATH)
+    chemsys_map = _proposal_chemsys_map(poscars)
+    known_ids = (
+        _load_known_material_ids(DEFAULT_RELAX_DB_PATH)
+        if any(not _exceeds_mp_element_limit(cs) for cs in chemsys_map.values())
+        else set()
+    )
     p_dir_label = Path(args.p_dir).name
     for idx, poscar in enumerate(poscars, start=1):
-        cs = chemsys_by_atomic_number(get_elements_from_poscar(poscar))
+        cs = chemsys_map[poscar]
         cs_norm = _normalize_chemsys(cs)
+        fname_for_screen = f"{poscar.parent.name}/{poscar.name}"
+        if _exceeds_mp_element_limit(cs_norm):
+            proposal_relax_records.append(
+                {
+                    "fname": fname_for_screen,
+                    "proposal_id": poscar.stem,
+                    "chemsys": cs_norm,
+                    "formula": None,
+                    "status": "failed",
+                    "error": MP_PREFETCH_ELEMENT_LIMIT_REASON,
+                    "skip_ehull_mp_reason": MP_PREFETCH_ELEMENT_LIMIT_REASON,
+                    "relaxation_attempted": False,
+                    "E_initial (eV)": None,
+                    "E_final (eV)": None,
+                    "ΔE (eV)": None,
+                    "file": None,
+                }
+            )
+            records_screen.append(
+                {
+                    "fname": fname_for_screen,
+                    "chemsys": cs_norm,
+                    "e_hull_mp": float("nan"),
+                    "skip_ehull_mp_reason": MP_PREFETCH_ELEMENT_LIMIT_REASON,
+                }
+            )
+            print(
+                f"[Stage2] {poscar.name}: {MP_PREFETCH_ELEMENT_LIMIT_REASON}; "
+                "relaxation/E_hull not attempted"
+            )
+            hull_done += 1
+            _append_progress(
+                "stage2",
+                {
+                    "fname": poscar.stem,
+                    "progress": f"{hull_done}/{total_props}",
+                    "status": "failed",
+                    "reason": MP_PREFETCH_ELEMENT_LIMIT_REASON,
+                    "relaxation_attempted": False,
+                    "p_dir": p_dir_label,
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                },
+            )
+            continue
         # proposal relax
-        proposal_record = _ensure_prop_relaxed(
-            poscar,
-            prop_relaxed_dir,
-            args.steps_max,
-            allow_run_params_fallback=args.allow_run_params_fallback,
-        )
+        proposal_record = _ensure_prop_relaxed(poscar, prop_relaxed_dir, args.steps_max)
         prop_status = "relaxed"
         if not proposal_record or proposal_record.get("status") == "failed":
             prop_status = "failed"
@@ -3380,7 +3467,6 @@ def stage_phase1_spec(args) -> None:
             proposal_record.get("chem_sys") if proposal_record else cs_norm,
             p_dir=p_dir_label,
         )
-        fname_for_screen = f"{poscar.parent.name}/{poscar.name}"
         proposal_relax_records.append(
             {
                 "fname": fname_for_screen,
@@ -3541,7 +3627,9 @@ def stage_phase1_spec(args) -> None:
             if chemsys_to_fetch_path.exists()
             else set()
         )
-        chemsys_to_fetch |= existing_chemsys_to_fetch
+        chemsys_to_fetch |= {
+            cs for cs in existing_chemsys_to_fetch if not _exceeds_mp_element_limit(cs)
+        }
 
         existing_records = (
             _read_jsonl(screening_path) if screening_path.exists() else []
@@ -3970,6 +4058,17 @@ def stage_export_mp_only(args) -> None:
 
     # Stage2 の結果を再利用。無ければ missing として NaN で埋める。
     def _load_cached_proposal_record(poscar: Path) -> dict | None:
+        screen_key = f"{p_dir_label}/{poscar.name}"
+        if (
+            screening_map.get(screen_key, {}).get("skip_ehull_mp_reason")
+            == MP_PREFETCH_ELEMENT_LIMIT_REASON
+        ):
+            return {
+                "material_id": poscar.stem,
+                "chem_sys": screening_map[screen_key]["chemsys"],
+                "status": "failed",
+                "file": None,
+            }
         relaxed_path = prop_relaxed_dir / f"{poscar.stem}_relaxed.vasp"
         failed_path = prop_relaxed_dir / f"{poscar.stem}_failed.vasp"
         target_path = (
@@ -4059,7 +4158,16 @@ def stage_export_mp_only(args) -> None:
     mp_formula_structs_by_cs: dict[str, dict[str, list[Structure]]] = {}
     mp_reference_rows_by_cs: dict[str, list[dict]] = {}
     reference_csv_columns = ["参照材料名", "chemsys", "e_hull_mp", "reduced_formula"]
-    all_chemsys = sorted({_normalize_chemsys(_chemsys_for_poscar(p)) for p in poscars})
+    all_chemsys = sorted(
+        {
+            _normalize_chemsys(_chemsys_for_poscar(p))
+            for p in poscars
+            if screening_map.get(f"{p_dir_label}/{p.name}", {}).get(
+                "skip_ehull_mp_reason"
+            )
+            != MP_PREFETCH_ELEMENT_LIMIT_REASON
+        }
+    )
     total_chemsys = len(all_chemsys)
     _append_progress(
         "stage4",

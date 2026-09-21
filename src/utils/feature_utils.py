@@ -161,7 +161,17 @@ def calculate_onehot(
     assert selected_atom_mask.shape == atomic_distribution.shape
     assert (selected_atom_mask.sum(dim=1) > 0).all(), "No allowed atom exists for selected k* in some WP rows"
 
-    wp_scores = torch.clamp(atomic_distribution, min=1e-6) * selected_atom_mask
+    nonfinite_rows = ~torch.isfinite(atomic_distribution).all(dim=1)
+    if nonfinite_rows.any():
+        print(
+            "[warning] Nonfinite atomic distribution during decoding: "
+            f"rows={int(nonfinite_rows.sum().item())}; using zero before clamp. "
+            "Original values are retained for candidate failure checks."
+        )
+    safe_distribution = torch.nan_to_num(
+        atomic_distribution, nan=0.0, posinf=0.0, neginf=0.0
+    )
+    wp_scores = torch.clamp(safe_distribution, min=1e-6) * selected_atom_mask
     _, max_index_wp = torch.max(wp_scores, dim=1)
     row_ids = torch.arange(selected_atom_mask.shape[0], device=selected_atom_mask.device)
     decoded_allowed = selected_atom_mask[row_ids, max_index_wp] > 0
