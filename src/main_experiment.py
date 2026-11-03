@@ -1,8 +1,10 @@
-import itertools
+import hashlib
+from pathlib import Path
+from types import SimpleNamespace
 import json
 import os
 import random
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,12 +21,15 @@ from src.evaluation.evaluation import evaluation_and_analysis
 
 # losses and datasets
 from src.losses.bandgap_loss import GapLoss
+from src.losses.force_pressure_loss import active_force_pressure
+from src.utils.config_loader import build_force_pressure_config
 from src.losses.tolerance_loss import ToleranceLoss
 from src.models.alignn_loader import Load_Pretrained_ALIGNN
 from src.models.crystalformer_loader import Load_Pretrained_Crystalformers
 from src.predictors import build_predictors
 from src.losses.loss_composer import LossComposer
 from src.energy import MatterSimEnergyModule
+from src.preprocess.prepro_utils import create_element_mask
 from src.utils.safe_expression import SafeExpressionEvaluator
 
 # model loading and optimization (assumed to be project-specific modules)
@@ -174,9 +179,8 @@ def main_experiment(
     model_name="Crystalformer",  #'Crystalformer' or 'ALIGNN' or 'Both'
     copy_mutation="copy_mutation",
     initial_dataset="megnet",  # 'megnet' or 'jarvis_supercon'
-    ox_solution_mode: str = "strict_unique",
-    wyckoff_expander: Optional[WyckoffExpander] = None  ,
-    input_dataframe: Optional[pd.DataFrame] = None  ,
+    wyckoff_expander: Optional[WyckoffExpander] = None,
+    input_dataframe: Optional[pd.DataFrame] = None,
     bg_margin_for_train: float = 0.04,
     bg_margin_for_eval: float = 0.2,
     bg_loss_mode: str = "band",  # 'band', 'minimize', 'maximize'
@@ -212,15 +216,32 @@ def main_experiment(
     mask_dict_path: Optional[str] = None,
     alignn_weights_dir: Optional[str] = None,
     use_element_count_l1_loss: bool = False,
-    element_count_l1_weight: float = 1.0,
+    element_count_l1_weight: float = 0.0,
     superhard_cfg: Optional[Dict[str, Any]] = None,
     optimizer: str = "gradient",
     seed: Optional[int] = None,
     sa_config: Optional[Dict[str, Any]] = None,
     grad_sa_hybrid_config: Optional[Dict[str, Any]] = None,
     poscar_magmom_min: Optional[float] = None,
-
+    force_pressure_config: Optional[Dict[str, Any]] = None,
 ):
+    if force_pressure_config is not None:
+        force_pressure_config = build_force_pressure_config(
+            SimpleNamespace(**force_pressure_config)
+        )
+    force_pressure_on = any(active_force_pressure(force_pressure_config))
+    if force_pressure_on:
+        model_path = (
+            Path(mattersim_model)
+            if mattersim_model
+            else (
+                Path(get_master_dir())
+                / "differentiable-MatterSim/pretrained_models/mattersim-v1.0.0-5M.pth"
+            )
+        )
+        if not model_path.is_file():
+            raise FileNotFoundError(f"MatterSim checkpoint not found: {model_path}")
+        mattersim_model = str(model_path.resolve())
     if optimizer == "grad_sa_hybrid" and model_name != "ALIGNN":
         raise NotImplementedError(
             "optimizer=grad_sa_hybrid is currently supported only for model_name='ALIGNN'"
@@ -271,7 +292,7 @@ def main_experiment(
         tolerance_loss_func = None
         angle_optimization = True
         max_ox_states = 10
-        #if (limit_coords_displacement is not None):
+        # if (limit_coords_displacement is not None):
         #    raise ValueError(
         #        "limit_coords_displacement must be None for non-perovskite system"
         #    )
@@ -300,7 +321,9 @@ def main_experiment(
         if model_name == "ALIGNN" and predictor_types - {"alignn"}:
             raise ValueError("ALIGNN mode supports only alignn predictors")
         if model_name == "Crystalformer" and predictor_types - {"crystalformer"}:
-            raise ValueError("Crystalformer mode supports only crystalformer predictors")
+            raise ValueError(
+                "Crystalformer mode supports only crystalformer predictors"
+            )
         predictors = build_predictors(config["predictors"], device=device)
         if not config.get("loss", {}).get("terms"):
             raise ValueError("loss.terms is required when predictors are configured")
@@ -308,20 +331,20 @@ def main_experiment(
         loss_composer = LossComposer(config["loss"]["terms"], evaluator)
         primary_metrics = _parse_primary_metrics(config)
         if not primary_metrics:
-            raise ValueError("primary_metrics is required when predictors are configured")
+            raise ValueError(
+                "primary_metrics is required when predictors are configured"
+            )
 
     energy_module = None
-    if energy_coef > 0.0:
-        if energy_every < 1:
+    if energy_coef > 0.0 or force_pressure_on:
+        if energy_coef > 0.0 and energy_every < 1:
             raise ValueError("energy_every must be >= 1")
-        energy_module = MatterSimEnergyModule(
-            device=device, model_path=mattersim_model
-        )
+        energy_module = MatterSimEnergyModule(device=device, model_path=mattersim_model)
 
     # -----------------  load pretrained models ------------------ #
     if model_name == "Crystalformer":
         if predictors is None:
-            bandgap_model, e_form_model = Load_Pretrained_Crystalformers()
+            bandgap_model, e_form_model = Load_Pretrained_Crystalformers(device=device)
         else:
             bandgap_model, e_form_model = None, None
         optimize_solution = optimize_solution_Crystalformer
@@ -343,6 +366,7 @@ def main_experiment(
 
     # -----------------  Create setting dict ----------------- - #
     settings_dict = {}
+    settings_dict["force_pressure_config"] = force_pressure_config
     settings_dict["intermid_dir_path"] = intermid_dir_path
     settings_dict["crystal_system"] = crystal_system
     settings_dict["max_ox_states"] = max_ox_states
@@ -360,7 +384,6 @@ def main_experiment(
     settings_dict["abc_range"] = abc_range
     settings_dict["copy_mutation"] = copy_mutation
     settings_dict["initial_dataset"] = initial_dataset
-    settings_dict["ox_solution_mode"] = ox_solution_mode
     settings_dict["num_workers"] = num_workers
     settings_dict["optimizer"] = optimizer
     if sa_config is not None:
@@ -393,30 +416,69 @@ def main_experiment(
     poscar_saved_dir = paths["poscar_saved_dir"]
     history_img_path = paths["history_img_path"]
     timing_log_path = os.path.join(result_dir, "opt_timing.jsonl")
+    if force_pressure_on:
+        digest = hashlib.sha256()
+        with open(mattersim_model, "rb") as checkpoint:
+            for chunk in iter(lambda: checkpoint.read(1024 * 1024), b""):
+                digest.update(chunk)
+        settings_dict["force_pressure_model"] = {
+            "path": mattersim_model,
+            "sha256": digest.hexdigest(),
+            "units": {"force": "eV/Angstrom", "stress": "GPa"},
+        }
+        with open(timing_log_path, "a", encoding="utf-8") as log:
+            log.write(
+                json.dumps(
+                    {
+                        "type": "force_pressure_config",
+                        **force_pressure_config,
+                        "model": settings_dict["force_pressure_model"],
+                    }
+                )
+                + "\n"
+            )
 
     # -----------------  Load Data ------------------ #
     all_inputs_dict = load_initial_data(
         settings_dict=settings_dict,
-        model_name = model_name,
-        dir_path = dir_path,
-        intermid_dir_path = settings_dict['intermid_dir_path'],
-        mask_dict_path = mask_dict_path,
-        crystal_system = settings_dict['crystal_system'],
-        initial_dataset = settings_dict["initial_dataset"],
-        ox_solution_mode = settings_dict["ox_solution_mode"],
-        max_ox_states = settings_dict['max_ox_states'],
-        num_candidate = settings_dict['num_candidate'],
-        batch_size = settings_dict['num_batch_crystal'],
-        use_atomic_mask = settings_dict['use_atomic_mask'],
-        num_workers = settings_dict['num_workers'],
-        mask_method = settings_dict['mask_method'],
-        test_mode = settings_dict['test_mode'],
-        angle_range = settings_dict['angle_range'],
-        abc_range = settings_dict['abc_range'],
+        model_name=model_name,
+        dir_path=dir_path,
+        intermid_dir_path=settings_dict["intermid_dir_path"],
+        mask_dict_path=mask_dict_path,
+        crystal_system=settings_dict["crystal_system"],
+        max_ox_states=settings_dict["max_ox_states"],
+        num_candidate=settings_dict["num_candidate"],
+        batch_size=settings_dict["num_batch_crystal"],
+        use_atomic_mask=settings_dict["use_atomic_mask"],
+        num_workers=settings_dict["num_workers"],
+        mask_method=settings_dict["mask_method"],
+        test_mode=settings_dict["test_mode"],
+        angle_range=settings_dict["angle_range"],
+        abc_range=settings_dict["abc_range"],
         input_dataframe=input_dataframe,
         wyckoff_expander=wyckoff_expander,
         device=device,
-    )            
+    )
+
+    if energy_module is not None:
+        max_atomic_number = energy_module.max_atomic_number
+        for mini_batch_inputs_dict, _ in all_inputs_dict:
+            atomic_distribution = mini_batch_inputs_dict["atomic_distribution"]
+            atomic_mask = mini_batch_inputs_dict["atomic_mask"]
+            if atomic_mask is None:
+                raise ValueError(
+                    "atomic_mask is required when MatterSim energy is enabled"
+                )
+            element_mask = create_element_mask(
+                num_elements=atomic_distribution.shape[1],
+                max_atomic_number=max_atomic_number,
+                device=atomic_mask.device,
+                dtype=atomic_mask.dtype,
+            )
+            mini_batch_inputs_dict["element_mask"] = element_mask
+            mini_batch_inputs_dict["atomic_mask"] = atomic_mask * element_mask.view(
+                1, -1, 1
+            )
 
     total_atoms = 0
     total_structures = 0
@@ -426,7 +488,9 @@ def main_experiment(
             size = size.detach().cpu().numpy()
         total_atoms += int(np.sum(size))
         total_structures += int(len(size))
-    avg_atoms = float(total_atoms) / float(total_structures) if total_structures else 0.0
+    avg_atoms = (
+        float(total_atoms) / float(total_structures) if total_structures else 0.0
+    )
     with open(timing_log_path, "a", encoding="ascii") as f:
         f.write(
             json.dumps(
@@ -446,10 +510,12 @@ def main_experiment(
     for mini_batch_data in tqdm(all_inputs_dict, desc="mini_batch", leave=False):
         # select batch candidate crystals
         mini_batch_inputs_dict, scalers = mini_batch_data
+        batch_settings = settings_dict.copy()
+        batch_settings["num_batch_crystal"] = len(mini_batch_inputs_dict["size"])
 
         # Optimization
         optimize_kwargs = {
-            "settings_dict": settings_dict,
+            "settings_dict": batch_settings,
             "mini_batch_inputs_dict": mini_batch_inputs_dict,
             "learning_rates": [lattice_lr, atom_lr, coords_lr],
             "learning_rate_cycle": [lattice_cycle, atom_cycle, coords_cycle],
@@ -481,12 +547,14 @@ def main_experiment(
         }
         if model_name == "ALIGNN":
             optimize_kwargs["timing_log_path"] = timing_log_path
+        if model_name == "Crystalformer":
+            optimize_kwargs.pop("wyckoff_expander")
         optimized_mini_batch_inputs_dict, time_series, scalers = optimize_solution(
             **optimize_kwargs
         )
         # Evaluation
-        optimized_mini_batch_inputs_dict = evaluation_for_each_batch(
-            settings_dict = settings_dict,
+        evaluation_kwargs = dict(
+            settings_dict=batch_settings,
             optimized_mini_batch_inputs_dict=optimized_mini_batch_inputs_dict,
             scalers=scalers,
             bandgap_model=bandgap_model,
@@ -504,6 +572,13 @@ def main_experiment(
             wyckoff_expander=wyckoff_expander,
             energy_module=energy_module,
             energy_coef=energy_coef,
+        )
+
+        if model_name == "Crystalformer":
+            evaluation_kwargs["ef_coef4eval"] = evaluation_kwargs.pop("e_form_coef")
+            evaluation_kwargs.pop("wyckoff_expander")
+        optimized_mini_batch_inputs_dict = evaluation_for_each_batch(
+            **evaluation_kwargs
         )
 
         stored_mini_batch_inputs_dict = _move_result_payload_to_cpu(
@@ -544,7 +619,7 @@ def main_experiment(
         tolerance_range,
         e_form_criteria,
         limit_coords_displacement,
-    main_target_name,
+        main_target_name,
         wyckoff_expander,
         task,
         superhard_cfg=superhard_cfg,

@@ -2,7 +2,6 @@ import sys
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-from warnings import warn
 from yaml import warnings
 
 from torch_geometric.nn import global_max_pool, global_mean_pool
@@ -91,14 +90,6 @@ class CGCNN_Original(torch.nn.Module):
                  atom_fea_len=64, n_conv=3, n_h=1):
         super(CGCNN_Original, self).__init__()
         embedding_dim = params.embedding_dim
-        if embedding_dim != 128:
-          warn(f"The original setting of embedding_dim is 128, instead of {embedding_dim}.")
-        if n_h != 1:
-          warn(f"The original setting of n_h is 1, instead of {n_h}.")
-        if atom_fea_len != 64:
-          warn(f"The original setting of atom_fea_len is 64, instead of {atom_fea_len}.")
-        if n_conv != 3:
-          warn(f"The original setting of n_conv is 3, instead of {n_conv}.")
 
         self.params = params
         self.output_intermediate_feat = output_intermediate_feat

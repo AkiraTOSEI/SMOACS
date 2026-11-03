@@ -14,8 +14,6 @@ def _to_copy(x):
         return cp.from_dlpack(to_dlpack(x))
     return 0
 
-# This function can be implemented with scatter_add,
-# which however does not ensure the reproducibility. 
 class IrregularMeanCUDA(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x_ik:Tensor, batch_i:Tensor, sizes:Tensor):

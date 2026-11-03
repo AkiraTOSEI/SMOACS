@@ -46,11 +46,11 @@ def calculate_loss_from_output(
             - tolerance_loss: Tolerance factor loss per sample (NaN if not perovskite).
             - tolerance: Tolerance values per structure (NaN if not perovskite).
     """
-    gap_loss = gap_loss_func(bandgap_pred, reduction="none")
+    gap_loss = gap_loss_func(bandgap_pred, reduction="none").reshape(-1)
     if e_form_min is not None:
-        ef_loss = torch.clip(ef_pred.squeeze() - e_form_min, min=0) * ef_coef
+        ef_loss = torch.clip(ef_pred.reshape(-1) - e_form_min, min=0) * ef_coef
     else:
-        ef_loss = ef_pred.squeeze() * ef_coef
+        ef_loss = ef_pred.reshape(-1) * ef_coef
     loss = gap_loss + ef_loss
 
     # tolerance loss
@@ -97,8 +97,8 @@ def calculate_loss_from_output(
         loss = loss + tolerance_loss
 
     else:
-        tolerance = torch.zeros_like(gap_loss).squeeze() * torch.nan
-        tolerance_loss = torch.zeros_like(gap_loss).squeeze() * torch.nan
+        tolerance = torch.zeros_like(gap_loss) * torch.nan
+        tolerance_loss = torch.zeros_like(gap_loss) * torch.nan
 
     total_each_loss = torch.nan_to_num(loss, nan=0.0)
 

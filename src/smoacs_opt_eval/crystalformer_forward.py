@@ -3,14 +3,6 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 
 from src.preprocess.crystalformer_preprocess import Crystalformer_preprocess
-from src.utils.coord import compute_lattice_vectors
-from src.utils.feature_utils import atom_dist_to_features
-from src.utils.mask_utils import (
-    masking_atomic_distribution,
-    stacking_learnable_oxsides_mask,
-)
-from src.utils.nn_utils import temperature_softmax
-from src.utils.scalers import ABC_Scaler, Angle_Scaler
 
 
 def Crystalformer_prediction(
@@ -64,7 +56,9 @@ def predict_all_crystalformer(
         "trans_vec": trans_vec,
         "size": size,
     }
-    return {name: predictor.predict(model_inputs) for name, predictor in predictors.items()}
+    return {
+        name: predictor.predict(model_inputs) for name, predictor in predictors.items()
+    }
 
 
 def forward_propagation_Crystalformer(
@@ -115,6 +109,7 @@ def forward_propagation_Crystalformer(
     angle_scaler = scalers["angle_scaler"]
     batch_ori = fixed_inputs["batch"].to(device)
     atomic_mask = fixed_inputs["atomic_mask"].to(device)
+    element_mask = fixed_inputs.get("element_mask")
     ox_states_used_mask = fixed_inputs["ox_states_used_mask"].to(device)
     init_coords = fixed_inputs["init_coords"].to(device)
     batch = batch_ori - batch_ori.min()  # batchを0から始まるように調整
@@ -137,6 +132,7 @@ def forward_propagation_Crystalformer(
         abc_scaler=abc_scaler,
         angle_scaler=angle_scaler,
         atomic_mask=atomic_mask,
+        element_mask=(element_mask.to(device) if element_mask is not None else None),
         ox_states_used_mask=ox_states_used_mask,
         ox_mask_learnable_tensor_per_crystal=ox_mask_learnable_tensor_per_crystal,
         init_coords=init_coords,

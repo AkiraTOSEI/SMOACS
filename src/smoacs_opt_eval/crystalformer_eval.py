@@ -1,14 +1,14 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 import torch
 
 from src.losses.loss_utils import calculate_loss_from_output
+from src.losses.force_pressure_loss import active_force_pressure, final_force_pressure
 from src.smoacs_opt_eval.crystalformer_forward import (
     Crystalformer_prediction,
     forward_propagation_Crystalformer,
     predict_all_crystalformer,
 )
-from src.utils.common import create_element_list
 from src.utils.feature_utils import calculate_onehot
 
 
@@ -23,7 +23,7 @@ def evaluation_for_each_batch_Crystalformer(
     crystal_system: Optional[str],
     limit_coords_displacement: Optional[float],
     e_form_min: Optional[float],
-    e_form_coef: float,
+    ef_coef4eval: int,
     adding_noise_scale: Optional[float],
     onehot_temperature: float = 1e-8,
     predictors: Optional[Dict[str, Any]] = None,
@@ -31,7 +31,6 @@ def evaluation_for_each_batch_Crystalformer(
     primary_metrics: Optional[Dict[str, str]] = None,
     energy_module: Optional[Any] = None,
     energy_coef: float = 0.0,
-    wyckoff_expander: Optional[Any] = None,
 ):
     """
     Evaluate optimized crystal structures using Crystalformer predictors.
@@ -52,7 +51,7 @@ def evaluation_for_each_batch_Crystalformer(
         crystal_system (Optional[str]): If 'perovskite', tolerance loss is applied.
         limit_coords_displacement (Optional[float]): Maximum displacement allowed from initial coordinates.
         e_form_min (Optional[float]): Minimum target for formation energy (used in ef loss).
-        e_form_coef (float): weighting the formation energy loss term.
+        ef_coef4eval (int): weighting the formation energy loss term.
         adding_noise_scale (Optional[float]): If set, applies Gaussian noise to coordinates.
         onehot_temperature (float, optional): Softmax temperature used for converting distributions to one-hot. Defaults to 1e-8.
 
@@ -62,9 +61,6 @@ def evaluation_for_each_batch_Crystalformer(
             - 'bandgap_onehot', 'ef_onehot', 'loss_onehot'
             - 'onehot_x', 'onehot_ox_mask', 'tolerance', 'tolerance_loss'
     """
-    if wyckoff_expander is not None:
-        raise NotImplementedError("Crystalformer does not support wyckoff_expander")
-
     scaled_batch_abc = optimized_mini_batch_inputs_dict["scaled_batch_abc"]
     scaled_batch_angle = optimized_mini_batch_inputs_dict["scaled_batch_angle"]
     batch_dir_coords = optimized_mini_batch_inputs_dict["batch_dir_coords"]
@@ -78,6 +74,8 @@ def evaluation_for_each_batch_Crystalformer(
     batch_ori = optimized_mini_batch_inputs_dict["batch"].to(device)
     batch = batch_ori - batch_ori.min()  # batchを0から始まるように調整
 
+    force_pressure_config = settings_dict.get("force_pressure_config")
+    force_pressure_on = any(active_force_pressure(force_pressure_config))
     abc_range = settings_dict["abc_range"]
     angle_range = settings_dict["angle_range"]
 
@@ -103,6 +101,9 @@ def evaluation_for_each_batch_Crystalformer(
             predictors=predictors,
         )
 
+        loss_inputs = (
+            output_dict if force_pressure_on else optimized_mini_batch_inputs_dict
+        )
         pred_dict = output_dict.get("pred_dict")
         if loss_composer is not None:
             if pred_dict is None:
@@ -115,34 +116,34 @@ def evaluation_for_each_batch_Crystalformer(
             ef_dist = pred_dict[ef_key]
             context = {
                 "gap_loss": lambda x: gap_loss_func(x, reduction="none"),
-                "ef_coef": e_form_coef,
+                "ef_coef": ef_coef4eval,
             }
             if tolerance_loss_func is not None:
                 context["tolerance_loss"] = tolerance_loss_func
-            _, _, _ = loss_composer.compute(pred_dict, context)
-            _, _, loss_dist, _, _, _ = calculate_loss_from_output(
+            _, base_soft, _ = loss_composer.compute(pred_dict, context)
+            _, legacy_base_soft, loss_dist, _, _, _ = calculate_loss_from_output(
                 bandgap_pred=bandgap_dist,
                 ef_pred=ef_dist,
-                sharpened_ox_mask=optimized_mini_batch_inputs_dict["sharpened_ox_mask"],
-                normalized_dist=optimized_mini_batch_inputs_dict["normalized_dist"],
+                sharpened_ox_mask=loss_inputs["sharpened_ox_mask"],
+                normalized_dist=loss_inputs["normalized_dist"],
                 site_ids=optimized_mini_batch_inputs_dict["site_ids"].to(device),
                 gap_loss_func=gap_loss_func,
                 tolerance_loss_func=tolerance_loss_func,
-                    ef_coef=e_form_coef,
+                ef_coef=ef_coef4eval,
                 crystal_system=crystal_system,
                 e_form_min=e_form_min,
                 radii_tensor=radii_tensor,
             )
         else:
-            _, _, loss_dist, _, _, _ = calculate_loss_from_output(
+            _, legacy_base_soft, loss_dist, _, _, _ = calculate_loss_from_output(
                 bandgap_pred=bandgap_dist,
                 ef_pred=ef_dist,
-                sharpened_ox_mask=optimized_mini_batch_inputs_dict["sharpened_ox_mask"],
-                normalized_dist=optimized_mini_batch_inputs_dict["normalized_dist"],
+                sharpened_ox_mask=loss_inputs["sharpened_ox_mask"],
+                normalized_dist=loss_inputs["normalized_dist"],
                 site_ids=optimized_mini_batch_inputs_dict["site_ids"].to(device),
                 gap_loss_func=gap_loss_func,
                 tolerance_loss_func=tolerance_loss_func,
-                ef_coef=e_form_coef,
+                ef_coef=ef_coef4eval,
                 crystal_system=crystal_system,
                 e_form_min=e_form_min,
                 radii_tensor=radii_tensor,
@@ -182,18 +183,42 @@ def evaluation_for_each_batch_Crystalformer(
                 bandgap_onehot = pred_onehot[primary_metrics["bandgap_onehot"]]
                 ef_onehot = pred_onehot[primary_metrics["ef_onehot"]]
 
-        _, _, loss_onehot, _, tolerance_loss, tolerance = calculate_loss_from_output(
-            bandgap_pred=bandgap_onehot,
-            ef_pred=ef_onehot,
-            sharpened_ox_mask=onehot_ox_mask,
-            normalized_dist=onehot_x,
-            site_ids=optimized_mini_batch_inputs_dict["site_ids"].to(device),
-            gap_loss_func=gap_loss_func,
-            tolerance_loss_func=tolerance_loss_func,
-            ef_coef=e_form_coef,
-            crystal_system=crystal_system,
-            e_form_min=e_form_min,
-            radii_tensor=radii_tensor,
+        _, base_onehot, loss_onehot, _, tolerance_loss, tolerance = (
+            calculate_loss_from_output(
+                bandgap_pred=bandgap_onehot,
+                ef_pred=ef_onehot,
+                sharpened_ox_mask=onehot_ox_mask,
+                normalized_dist=onehot_x,
+                site_ids=optimized_mini_batch_inputs_dict["site_ids"].to(device),
+                gap_loss_func=gap_loss_func,
+                tolerance_loss_func=tolerance_loss_func,
+                ef_coef=ef_coef4eval,
+                crystal_system=crystal_system,
+                e_form_min=e_form_min,
+                radii_tensor=radii_tensor,
+            )
+        )
+
+    if force_pressure_on:
+        if loss_composer is not None:
+            _, base_onehot, _ = loss_composer.compute(pred_onehot, context)
+        elif not settings_dict.get("superhard_cfg"):
+            base_soft = legacy_base_soft
+
+    final_physical = {}
+    if force_pressure_on:
+        final_physical = final_force_pressure(
+            energy_module,
+            force_pressure_config,
+            output_dict["normalized_dist"],
+            onehot_x,
+            output_dict["pos"],
+            output_dict["lattice_vectors"],
+            size,
+            base_soft,
+            base_onehot,
+            energy_coef,
+            optimized_mini_batch_inputs_dict.get("fnames"),
         )
 
     # 結果の記録
@@ -210,4 +235,5 @@ def evaluation_for_each_batch_Crystalformer(
     optimized_mini_batch_inputs_dict["tolerance_loss"] = tolerance_loss
     optimized_mini_batch_inputs_dict["onehot_ox_mask"] = onehot_ox_mask
 
+    optimized_mini_batch_inputs_dict.update(final_physical)
     return optimized_mini_batch_inputs_dict

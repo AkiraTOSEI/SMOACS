@@ -1,3 +1,4 @@
+# from alignn.data import get_torch_dataset
 import json
 import os
 import tempfile
@@ -12,9 +13,9 @@ import torch.nn as nn
 from jarvis.core.atoms import Atoms
 from tqdm import tqdm
 
+from third_party.alignn_minimal.models.alignn import ALIGNNConfig
 from src.models.alignn4inv import ALIGNN4inverse
 from src.utils.common import get_master_dir
-from third_party.alignn_minimal.models.alignn import ALIGNNConfig
 
 
 def figshare_model_list():

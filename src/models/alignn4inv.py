@@ -8,10 +8,10 @@ import torch.nn as nn
 from third_party.alignn_minimal.models.alignn import (
     ALIGNNConfig,
     ALIGNNConv,
-    AvgPooling,
     EdgeGatedGraphConv,
     MLPLayer,
     RBFExpansion,
+    AvgPooling,
 )
 
 

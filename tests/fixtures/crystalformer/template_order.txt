@@ -1,0 +1,3 @@
+NaCl_4.vasp
+NaCl_2.vasp
+NaCl_6.vasp

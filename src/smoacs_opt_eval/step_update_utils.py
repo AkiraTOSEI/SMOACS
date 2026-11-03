@@ -97,7 +97,7 @@ def update_parameters_step(
             updated_targets (List[torch.Tensor]): Updated list of optimization targets.
             additional_info (Dict[str, Any]): Metadata including updated optimizers, masks, and scaler.
     """
-    additional_info = {}
+    additional_info = {"mutation_applied": False}
     if copy_mutation.startswith("copy_mutation"):
         optimizer_lattice.zero_grad()
         optimizer_atom.zero_grad()
@@ -182,8 +182,10 @@ def update_parameters_step(
                 atom_dist_init=parse_evolution_parameters_dict["atom_dist_init"],
                 top_ratio=parse_evolution_parameters_dict["top_ratio"],
                 mutation_noise=parse_evolution_parameters_dict["mutation_noise"],
+                graph_fallback_geometry=fixed_inputs.get("graph_fallback_geometry"),
             )
             # optimizers_and_schedulers
+            additional_info["mutation_applied"] = True
             additional_info["optimizer_lattice"] = optimizers_and_schedulers[0]
             additional_info["optimizer_atom"] = optimizers_and_schedulers[1]
             additional_info["optimizer_coords"] = optimizers_and_schedulers[2]

@@ -145,8 +145,6 @@ def _scaled_dot_product_attention(
         # The scaled_dot operation involves the summations along the key axis
         # whose size varies among batch samples. So we split concatenated data 
         # into a list of batch samples and apply the scaled_dot for each sample.
-        # We could do the same without the splitting & looping by using scatter_add,
-        # but we rather avoid scatter_add as it breaks reproducibility in backprop.
         attn = torch.split_with_sizes(attn, edg_sizes)
         attn = torch.cat([F.softmax(a.view(qs,ks,-1),dim=1).view(qs*ks,-1) for a,qs,ks in zip(attn,q_sizes,k_sizes)])
         if dropout_p > 0.0:

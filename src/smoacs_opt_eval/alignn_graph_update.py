@@ -12,6 +12,7 @@ from src.spg_wp.wyckoff_expander import WyckoffExpander
 
 from src.utils.coord import compute_lattice_vectors
 from src.data_loader.alignn_loader import load_ALIGNN_initial_data
+from src.preprocess.alignn_geometry import prepare_alignn_geometry
 
 
 def calculate_update_steps(num_steps: int, num_g_upd: int) -> List[int]:
@@ -77,8 +78,6 @@ def matching_by_hash_table(
     return matching_indices
 
 
-
-
 def graph_update(
         intermid_data_dict: Dict, 
         num_batch_crystal: int,
@@ -123,8 +122,6 @@ def graph_update(
         max_ox_states=-1,  # dummy
         mask_method='dummy',  # dummy
         crystal_system='dummy',  # dummy
-        initial_dataset="megnet",  # dummy
-        ox_solution_mode="strict_unique",  # dummy
         angle_range=(np.nan, np.nan),  # dummy
         abc_range=(np.nan, np.nan),  # dummy
         graph_update_mode=True,
@@ -168,7 +165,6 @@ def graph_update(
     return intermid_data_dict
 
 
-
 def graph_parameter_update(
     optimization_target_names: List[str],
     optimization_targets: List[torch.Tensor],
@@ -177,6 +173,9 @@ def graph_parameter_update(
     num_batch_crystal: int,
     wyckoff_expander: Optional[WyckoffExpander],
     num_workers: int = 4,
+    *,
+    scalers: Optional[Dict[str, Any]] = None,
+    limit_coords_displacement: Optional[float] = None,
 ) -> Dict[str, Union[torch.Tensor, str]]:
     """
     Update graph-related parameters in the mini-batch dictionary after preparing intermediate tensors.
@@ -204,16 +203,38 @@ def graph_parameter_update(
     ):
         intermid_data_dict[target_name] = target_tensor.detach().clone().to(device)
 
-    
     intermid_data_dict["atomic_mask"] = mini_batch_inputs_dict["atomic_mask"].to(device)
     intermid_data_dict['size'] = mini_batch_inputs_dict["size"].to(device)
     intermid_data_dict['radii_tensor'] = mini_batch_inputs_dict["radii_tensor"].to(device)
     intermid_data_dict['site_ids'] = mini_batch_inputs_dict["site_ids"].to(device)
     intermid_data_dict['ox_states_used_mask'] = mini_batch_inputs_dict["ox_states_used_mask"].to(device)
     intermid_data_dict['fnames'] = mini_batch_inputs_dict["fnames"]
-    intermid_data_dict['batch_abc'] = output_dict["batch_abc"].detach().clone().to(device)
-    intermid_data_dict['batch_angle'] = output_dict["batch_angle"].detach().clone().to(device)
+    if wyckoff_expander is None:
+        if scalers is None:
+            raise ValueError("Non-Wyckoff graph updates require the current scalers")
+        batch_abc, batch_angle, _, coords_geometry, _ = prepare_alignn_geometry(
+            intermid_data_dict["scaled_batch_abc"],
+            intermid_data_dict["scaled_batch_angle"],
+            intermid_data_dict["batch_dir_coords"],
+            abc_scaler=scalers["abc_scaler"],
+            angle_scaler=scalers["angle_scaler"],
+            init_coords=mini_batch_inputs_dict["init_coords"].to(device),
+            limit_coords_displacement=limit_coords_displacement,
+        )
+        intermid_data_dict["batch_abc"] = batch_abc.detach().clone()
+        intermid_data_dict["batch_angle"] = batch_angle.detach().clone()
+        intermid_data_dict["batch_dir_coords"] = coords_geometry.detach().clone()
+    else:
+        intermid_data_dict["batch_abc"] = (
+            output_dict["batch_abc"].detach().clone().to(device)
+        )
+        intermid_data_dict["batch_angle"] = (
+            output_dict["batch_angle"].detach().clone().to(device)
+        )
     intermid_data_dict['wp_size'] = mini_batch_inputs_dict['wp_size'].to(device)
+    intermid_data_dict["graph_fallback_geometry"] = mini_batch_inputs_dict.get(
+        "graph_fallback_geometry"
+    )
 
     # Update graph using external function
     intermid_data_dict = graph_update(

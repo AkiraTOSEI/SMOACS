@@ -7,9 +7,8 @@ import pandas as pd
 from IPython.display import clear_output, display
 from jarvis.db.figshare import data as jarvis_data
 
-from src.utils.save_optimization_result import save_optimization_results
+from src.losses.force_pressure_loss import FINAL_KEYS
 from src.spg_wp.wyckoff_expander import WyckoffExpander
-from src.utils.schedule_utils import set_schedule
 from src.utils.structure_neutrality_check import (
     check_neurality_bondlength_and_save_structure,
     perovskite_coordinate_check,
@@ -82,8 +81,13 @@ def load_and_prepare_dataframe(
     if "loss_total" in d:
         data_dict["loss_total"] = d["loss_total"]
 
+    for key in FINAL_KEYS:
+        if key in d:
+            data_dict[key] = d[key]
     df = pd.DataFrame(data_dict)
-    if superhard_mode and "loss_total" in df.columns:
+    if (
+        superhard_mode or "loss_total_onehot" in df.columns
+    ) and "loss_total" in df.columns:
         df = df.sort_values(["loss_total"]).reset_index(drop=True)
     else:
         df = df.sort_values(["loss_onehot", "ef_onehot"]).reset_index(drop=True)
@@ -109,7 +113,7 @@ def load_and_prepare_dataframe(
     ]
     for col in optional_cols:
         if col in d:
-            df[col] = d[col]
+            df[col] = pd.Series(d[col], index=np.arange(len(d["size"])))
     df.to_csv(tmp_csv_path)
 
     lattice_vectors = d["lattice_vectors"]
@@ -286,6 +290,7 @@ def select_and_reorder_columns(
             "loss_energy",
             "loss_total",
         ]
+        optional_columns.extend(FINAL_KEYS)
         for col in optional_columns:
             if col in df.columns:
                 columns.append(col)
@@ -332,6 +337,7 @@ def select_and_reorder_columns(
         "loss_energy",
         "loss_total",
     ]
+    optional_columns.extend(FINAL_KEYS)
     for col in optional_columns:
         if col in df.columns:
             columns.append(col)

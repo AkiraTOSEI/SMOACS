@@ -4,6 +4,11 @@ import torch
 import torch.nn.functional as F
 
 from src.losses.element_count_loss import element_count_l1_loss
+from src.losses.force_pressure_loss import (
+    active_force_pressure,
+    force_pressure_losses,
+    weighted_force_pressure,
+)
 from src.losses.loss_utils import calculate_loss_from_output
 from src.smoacs_opt_eval.alignn_forward import forward_propagation_ALIGNN
 from src.smoacs_opt_eval.crystalformer_forward import forward_propagation_Crystalformer
@@ -35,9 +40,10 @@ def evaluate_loss_alignn(
     adding_noise_scale: Optional[float] = None,
     wyckoff_expander=None,
     use_element_count_l1_loss: bool = False,
-    element_count_l1_weight: float = 1.0,
+    element_count_l1_weight: float = 0.0,
     grad_enabled: bool = True,
     superhard_mode: bool = False,
+    force_pressure_config=None,
 ) -> Dict[str, Any]:
     with torch.set_grad_enabled(grad_enabled):
         bandgap_pred, ef_pred, output_dict = forward_propagation_ALIGNN(
@@ -58,12 +64,17 @@ def evaluate_loss_alignn(
         pred_dict = output_dict.get("pred_dict")
         energy_loss = None
         energy_per_atom = None
-        if (
+        force_on, pressure_on = active_force_pressure(force_pressure_config)
+        diagnostics = {}
+        energy_due = (
             energy_module is not None
             and energy_coef > 0.0
             and energy_every > 0
             and (step_i is None or step_i % energy_every == 0)
-        ):
+        )
+        if force_on or pressure_on or energy_due:
+            if energy_module is None:
+                raise ValueError("MatterSim module is required for force/pressure loss")
             device = optimization_targets[0].device
             size = mini_batch_inputs_dict["size"].to(device)
             batch_index = torch.repeat_interleave(
@@ -73,15 +84,32 @@ def evaluate_loss_alignn(
             positions = direct_to_cartesian_batch(
                 output_dict["normed_batch_dir_coords"], lattice_per_atom
             )
-            energy = energy_module.compute_energy(
+            inputs = dict(
                 atom_types=output_dict["normalized_dist"],
                 positions=positions,
                 lattice=output_dict["lattice_vectors"],
                 sizes=size,
                 batch_index=batch_index,
             )
-            energy_per_atom = energy / size.to(energy.dtype)
-            energy_loss = energy_per_atom.mean() * energy_coef
+            if force_on or pressure_on:
+                properties = energy_module.compute_properties(
+                    **inputs,
+                    include_forces=force_on,
+                    include_stresses=pressure_on,
+                    create_graph=grad_enabled
+                )
+                diagnostics = force_pressure_losses(
+                    properties,
+                    size,
+                    force_pressure_config,
+                    mini_batch_inputs_dict.get("fnames"),
+                )
+                energy = properties["total_energy"]
+            else:
+                energy = energy_module.compute_energy(**inputs)
+            if energy_due:
+                energy_per_atom = energy / size.to(energy.dtype)
+                energy_loss = energy_per_atom.mean() * energy_coef
 
         if loss_composer is not None:
             if pred_dict is None:
@@ -152,7 +180,7 @@ def evaluate_loss_alignn(
 
         element_count_l1_value = torch.zeros((), device=total_loss.device)
         per_crystal_loss = None
-        if use_element_count_l1_loss:
+        if use_element_count_l1_loss or element_count_l1_weight != 0.0:
             size_for_loss = mini_batch_inputs_dict["size"].to(total_loss.device)
             current_atomic_distribution = optimization_targets[3]
             if int(size_for_loss.sum().item()) != current_atomic_distribution.shape[0]:
@@ -173,7 +201,13 @@ def evaluate_loss_alignn(
             total_loss = total_loss + energy_loss
             each_loss = each_loss + (energy_per_atom * energy_coef)
 
+        if diagnostics:
+            contribution = weighted_force_pressure(diagnostics)
+            total_loss = total_loss + contribution.mean()
+            each_loss = each_loss + contribution
+
         return {
+            "force_pressure": diagnostics,
             "total_loss": total_loss,
             "each_loss": each_loss,
             "gap_loss": gap_loss,
@@ -215,8 +249,9 @@ def evaluate_loss_crystalformer(
     angle_range=(30.0, 150.0),
     adding_noise_scale: Optional[float] = None,
     use_element_count_l1_loss: bool = False,
-    element_count_l1_weight: float = 1.0,
+    element_count_l1_weight: float = 0.0,
     grad_enabled: bool = True,
+    force_pressure_config=None,
 ) -> Dict[str, Any]:
     with torch.set_grad_enabled(grad_enabled):
         bandgap_pred, ef_pred, output_dict = forward_propagation_Crystalformer(
@@ -236,23 +271,45 @@ def evaluate_loss_crystalformer(
         pred_dict = output_dict.get("pred_dict")
         energy_loss = None
         energy_per_atom = None
-        if (
+        force_on, pressure_on = active_force_pressure(force_pressure_config)
+        diagnostics = {}
+        energy_due = (
             energy_module is not None
             and energy_coef > 0.0
             and energy_every > 0
             and (step_i is None or step_i % energy_every == 0)
-        ):
+        )
+        if force_on or pressure_on or energy_due:
+            if energy_module is None:
+                raise ValueError("MatterSim module is required for force/pressure loss")
             device = optimization_targets[0].device
             size = mini_batch_inputs_dict["size"].to(device)
-            energy = energy_module.compute_energy(
+            inputs = dict(
                 atom_types=output_dict["normalized_dist"],
                 positions=output_dict["pos"],
                 lattice=output_dict["lattice_vectors"],
                 sizes=size,
                 batch_index=output_dict["batch"],
             )
-            energy_per_atom = energy / size.to(energy.dtype)
-            energy_loss = energy_per_atom.mean() * energy_coef
+            if force_on or pressure_on:
+                properties = energy_module.compute_properties(
+                    **inputs,
+                    include_forces=force_on,
+                    include_stresses=pressure_on,
+                    create_graph=grad_enabled
+                )
+                diagnostics = force_pressure_losses(
+                    properties,
+                    size,
+                    force_pressure_config,
+                    mini_batch_inputs_dict.get("fnames"),
+                )
+                energy = properties["total_energy"]
+            else:
+                energy = energy_module.compute_energy(**inputs)
+            if energy_due:
+                energy_per_atom = energy / size.to(energy.dtype)
+                energy_loss = energy_per_atom.mean() * energy_coef
 
         if loss_composer is not None:
             if pred_dict is None:
@@ -317,7 +374,7 @@ def evaluate_loss_crystalformer(
 
         element_count_l1_value = torch.zeros((), device=total_loss.device)
         per_crystal_loss = None
-        if use_element_count_l1_loss:
+        if use_element_count_l1_loss or element_count_l1_weight != 0.0:
             size_for_loss = mini_batch_inputs_dict["size"].to(total_loss.device)
             current_atomic_distribution = optimization_targets[3]
             per_crystal_loss = element_count_l1_loss(
@@ -333,7 +390,13 @@ def evaluate_loss_crystalformer(
             total_loss = total_loss + energy_loss
             each_loss = each_loss + (energy_per_atom * energy_coef)
 
+        if diagnostics:
+            contribution = weighted_force_pressure(diagnostics)
+            total_loss = total_loss + contribution.mean()
+            each_loss = each_loss + contribution
+
         return {
+            "force_pressure": diagnostics,
             "total_loss": total_loss,
             "each_loss": each_loss,
             "gap_loss": gap_loss,

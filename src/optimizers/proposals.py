@@ -32,17 +32,20 @@ def propose_state(
     abc_scaler=None,
     angle_scaler=None,
     hard_constraints: bool = True,
+    wrap_coords: bool = True,
 ) -> List[torch.Tensor]:
     """
     Propose a new state by applying a single random move.
 
     Moves:
-      - coords: Gaussian noise on fractional coordinates (wrapped to [0, 1))
+      - coords: Gaussian noise on fractional coordinates (optionally wrapped)
       - lattice: Gaussian noise on scaled lattice lengths
       - angle: Gaussian noise on scaled lattice angles
       - atom: Gaussian noise on atomic distribution logits
 
     Note:
+      ALIGNN can pass wrap_coords=False to retain the same unwrapped coordinate
+      representation as its graph images and initial-position constraints.
       The current SA integration in `main.py` fixes move choices to
       `coords/lattice/angle`, but this helper keeps `atom` support for
       backward compatibility with older callers.
@@ -78,7 +81,8 @@ def propose_state(
                 min=init_coords - limit_coords_displacement,
                 max=init_coords + limit_coords_displacement,
             )
-        proposal[2] = torch.remainder(proposal[2], 1.0)
+        if wrap_coords:
+            proposal[2] = torch.remainder(proposal[2], 1.0)
     elif move == "lattice":
         sigma = move_scales.get("lattice", 1e-3)
         noise = (

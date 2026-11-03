@@ -3,7 +3,6 @@ import copy
 import sys
 from pathlib import Path
 import os
-from typing import Optional
 import numpy as np
 
 import src.main_experiment as _main_experiment_module
@@ -19,11 +18,10 @@ from src.spg_wp.P2m import P2mWyckoff
 from src.spg_wp.wyckoff_expander import WyckoffExpander
 import pandas as pd
 from src.utils.common import get_master_dir
-from src.utils.config_loader import load_config
-from src.utils.element_constraints import (
-    get_element_constraints,
-    select_mask_dict_path,
-    write_forbidden_element_mask,
+from src.utils.config_loader import (
+    load_config,
+    add_force_pressure_arguments,
+    build_force_pressure_config,
 )
 from src.utils.eform_only_mode import (
     EFORM_ONLY_TASK,
@@ -357,17 +355,6 @@ parser.add_argument(
     default=100,
     help="maximum oxidation patterns (mapped to internal max_ox_states, default: 100)",
 )
-parser.add_argument(
-    "--ox_solution_mode",
-    type=str,
-    choices=["strict_unique", "up_to_k"],
-    default="strict_unique",
-    help=(
-        "oxidation-state sampling mode. Both modes use legacy count semantics: "
-        "sample up to max_ox_patterns unique neutral assignments and pad the rest "
-        "with dummy entries. 'up_to_k' is kept as a compatibility alias."
-    ),
-)
 
 parser.add_argument(
     "--space_group",
@@ -432,8 +419,8 @@ parser.add_argument(
 parser.add_argument(
     "--element_count_l1_weight",
     type=float,
-    default=1.0,
-    help="weight for per-crystal element-count L1 regularization (default: 1.0)",
+    default=0.0,
+    help="weight for per-crystal element-count L1 regularization (default: 0.0)",
 )
 parser.add_argument(
     "--mattersim_model",
@@ -661,7 +648,9 @@ parser.add_argument(
     help="override task preset copy_mutation string",
 )
 
+add_force_pressure_arguments(parser)
 args = parser.parse_args()
+force_pressure_config = build_force_pressure_config(args)
 model_name = args.model_name
 task = args.task
 target_val = args.target_val
@@ -677,7 +666,6 @@ num_candidate = args.num_candidate
 num_workers = args.num_workers
 num_steps = args.num_steps
 max_ox_patterns = args.max_ox_patterns
-ox_solution_mode = args.ox_solution_mode
 target_space_group_no = args.space_group
 config_path = args.config
 config = load_config(config_path) if config_path else None
@@ -821,7 +809,7 @@ if config and "energy" in config:
         energy_coef = float(energy_cfg["coef"])
     if "--energy_every" not in sys.argv and "every" in energy_cfg:
         energy_every = int(energy_cfg["every"])
-    if "--mattersim_model" not in sys.argv and "model" in energy_cfg:
+    if args.mattersim_model is None and "model" in energy_cfg:
         mattersim_model = energy_cfg["model"]
 if config and "element_count_l1" in config:
     elem_cfg = config["element_count_l1"] or {}
@@ -833,9 +821,6 @@ if w_E is not None and "--energy_coef" not in sys.argv:
     energy_coef = float(w_E)
 initial_structures_path = args.initial_structures_path
 mask_dict_path = args.mask_dict_path
-element_constraints = get_element_constraints(config)
-forbidden_elements = element_constraints["forbidden_elements"]
-mask_dict_path = select_mask_dict_path(mask_dict_path, element_constraints)
 
 
 def _resolve_path_arg(value: str, arg_name: str) -> Path:
@@ -853,45 +838,14 @@ def _resolve_path_arg(value: str, arg_name: str) -> Path:
     return path
 
 
-def _infer_space_group_no_from_info_pkl(path: Optional[Path]) -> Optional[int]:
-    if path is None or not path.is_file() or path.suffix != ".pkl":
-        return None
-
-    name = path.name
-    prefix = "initial_MP_based_"
-    suffix = "_info.pkl"
-    if not (name.startswith(prefix) and name.endswith(suffix)):
-        return None
-
-    spg_key = name[len(prefix) : -len(suffix)]
-    mapping = {
-        "Amm2": 38,
-        "P2m": 10,
-        "Fbar43m": 216,
-        "R3m": 160,
-        "P6_3m": 176,
-        "P321": 150,
-        "P4mmm": 123,
-    }
-    if spg_key not in mapping:
-        raise ValueError(
-            "Unsupported space-group info pkl name. "
-            f"Expected one of {sorted(mapping)}, got: {path.name}"
-        )
-    return mapping[spg_key]
-
-
 if task == "superhard":
     if initial_structures_path is None:
-        raise ValueError(
-            "--initial_structures_path is required for task=superhard. "
-            "Model weights and large initial-structure datasets are not bundled "
-            "with the public repository."
+        initial_structures_path = (
+            "/home/afujii/polar_SMOACS/data/raw_data/initial_superhard"
         )
     if mask_dict_path is None:
-        raise ValueError(
-            "--mask_dict_path is required for task=superhard. "
-            "Provide a generated oxidation-mask .npz file."
+        mask_dict_path = (
+            "/home/afujii/polar_SMOACS/data/intermidiat/mask_dict_super_common.npz"
         )
     if "--e_form_coef" not in sys.argv:
         e_from_coef = 0.0
@@ -933,16 +887,7 @@ if task == "superhard":
             },
         }
 
-if (config is None or not config.get("predictors")) and (
-    bg_target is not None or use_magmom_loss
-):
-    existing_config = dict(config or {})
-    if any(key in existing_config for key in ("loss", "output")):
-        raise ValueError(
-            "A config with loss/output but without predictors is not supported. "
-            "Provide a complete predictor config, or use only top-level runtime "
-            "sections such as element_constraints, energy, and element_count_l1."
-        )
+if config is None and (bg_target is not None or use_magmom_loss):
     if bg_target is None:
         bg_target = 0.0
     if "--e_form_coef" not in sys.argv:
@@ -1002,11 +947,7 @@ if (config is None or not config.get("predictors")) and (
             }
         },
     }
-    for key, value in existing_config.items():
-        if key not in {"predictors", "loss", "output"}:
-            config[key] = value
 
-initial_info_pkl_path: Optional[Path] = None
 if initial_structures_path is not None:
     initial_structures_path = _resolve_path_arg(
         initial_structures_path, "--initial_structures_path"
@@ -1022,39 +963,12 @@ if initial_structures_path is not None:
             "--initial_structures_path must be a directory or a .pkl file: "
             f"{initial_structures_path}"
         )
-    inferred_space_group_no = _infer_space_group_no_from_info_pkl(initial_structures_path)
-    if inferred_space_group_no is not None:
-        initial_info_pkl_path = initial_structures_path
-        if target_space_group_no > 0 and target_space_group_no != inferred_space_group_no:
-            raise ValueError(
-                "--space_group does not match --initial_structures_path info pkl: "
-                f"{target_space_group_no} vs {inferred_space_group_no}"
-            )
-        if target_space_group_no <= 0:
-            target_space_group_no = inferred_space_group_no
-            print(
-                "[info] Inferred --space_group from info pkl: "
-                f"{target_space_group_no} ({initial_structures_path.name})"
-            )
     initial_structures_path = str(initial_structures_path)
 
 if mask_dict_path is not None:
     mask_dict_path = _resolve_path_arg(mask_dict_path, "--mask_dict_path")
     if not (mask_dict_path.is_file() and mask_dict_path.suffix == ".npz"):
         raise ValueError("--mask_dict_path must be a .npz file: " f"{mask_dict_path}")
-    if forbidden_elements:
-        generated_mask_dir = (
-            Path(get_master_dir()) / "data" / "intermidiate" / "generated_masks"
-        )
-        mask_dict_path = write_forbidden_element_mask(
-            base_mask_path=mask_dict_path,
-            forbidden_elements=forbidden_elements,
-            out_dir=generated_mask_dir,
-        )
-        print(
-            "[info] element_constraints.forbidden_elements applied: "
-            f"{forbidden_elements} -> {mask_dict_path}"
-        )
     mask_dict_path = str(mask_dict_path)
 
 # parameter settings from arguments
@@ -1120,9 +1034,7 @@ elif (
 ):
     condition_dict = condition_dict["Crystalformer_perov"]
 elif (
-    model_name == "ALIGNN"
-    and task == "bg_and_eform"
-    and structure == "perovskite3x3x3"
+    model_name == "ALIGNN" and task == "bg_and_eform" and structure == "perovskite3x3x3"
 ):
     condition_dict = condition_dict["ALIGNN_perov3x3x3"]
 elif (
@@ -1230,15 +1142,12 @@ if target_space_group_no > 0:
         num_equivalent_sites=sg_wyckoff.num_equivalent_sites,
         device=device,
     )
-    if initial_info_pkl_path is not None:
-        spg_df = pd.read_pickle(initial_info_pkl_path)
-    else:
-        spg_df = pd.read_pickle(
-            os.path.join(
-                get_master_dir(),
-                f'data/raw_data/initial_MP_based_{target_space_group.replace("/","")}_info.pkl',
-            )
+    spg_df = pd.read_pickle(
+        os.path.join(
+            get_master_dir(),
+            f'data/raw_data/initial_MP_based_{target_space_group.replace("/","")}_info.pkl',
         )
+    )
     data_list = spg_df.to_dict(orient="records")
     _adjust_input_dataframe_ox_patterns(data_list, max_ox_patterns)
 else:
@@ -1269,7 +1178,6 @@ result_dir = main_experiment(
     limit_coords_displacement=limit_coords_displacement,  # 0.15 for perovskite, None for non-perovskite
     abc_range=(abc_min, abc_max),
     max_ox_states=max_ox_patterns,
-    ox_solution_mode=ox_solution_mode,
     atom_lr=condition_dict["atom_lr"],
     lattice_lr=condition_dict["lattice_lr"],
     coords_lr=condition_dict["coord_lr"],
@@ -1285,6 +1193,7 @@ result_dir = main_experiment(
     energy_coef=energy_coef,
     energy_every=energy_every,
     mattersim_model=mattersim_model,
+    force_pressure_config=force_pressure_config,
     use_element_count_l1_loss=use_element_count_l1_loss,
     element_count_l1_weight=element_count_l1_weight,
     superhard_cfg=(

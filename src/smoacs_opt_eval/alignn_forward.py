@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import dgl
 import torch
-from torch import nn
 
 from src.preprocess.alignn_preprocess import ALIGNN_preprocess
 from src.spg_wp.wyckoff_expander import WyckoffExpander
@@ -56,14 +55,16 @@ def predict_all_alignn(
         "bondlength": bondlength,
         "bond_angles": bond_angles,
     }
-    return {name: predictor.predict(model_inputs) for name, predictor in predictors.items()}
+    return {
+        name: predictor.predict(model_inputs) for name, predictor in predictors.items()
+    }
 
 
 def forward_propagation_ALIGNN(
     optimization_targets: List[torch.Tensor],
     fixed_inputs: Dict[str, torch.Tensor],
     scalers: dict,
-    temperature:float,
+    temperature: float,
     limit_coords_displacement: Optional[float],
     bandgap_model: Optional[torch.nn.Module],
     e_form_model: Optional[torch.nn.Module],
@@ -97,54 +98,73 @@ def forward_propagation_ALIGNN(
             - output_dict (Dict[str, torch.Tensor]): Dictionary of intermediate outputs including
               atomic features, coordinates, structure parameters, and bond/angle features.
     """
-    scaled_batch_abc, scaled_batch_angle, batch_dir_coords, atomic_distribution, ox_mask_learnable_tensor_per_crystal = optimization_targets
-    batch_dst_ids = fixed_inputs['batch_dst_ids']
-    batch_src_ids = fixed_inputs['batch_src_ids']
-    batch_displace = fixed_inputs['batch_displace']
-    z_src_ids = fixed_inputs['z_src_ids']
-    z_dst_ids = fixed_inputs['z_dst_ids']
-    size = fixed_inputs['size']
-    wp_size = fixed_inputs['wp_size']
-    num_edges = fixed_inputs['num_edges']
-    atom_feat_matrix = fixed_inputs['atom_feat_matrix']
-    atomic_mask = fixed_inputs['atomic_mask']
-    ox_states_used_mask = fixed_inputs['ox_states_used_mask']
-    g = fixed_inputs['g']
-    lg = fixed_inputs['lg']
+    (
+        scaled_batch_abc,
+        scaled_batch_angle,
+        batch_dir_coords,
+        atomic_distribution,
+        ox_mask_learnable_tensor_per_crystal,
+    ) = optimization_targets
+    batch_dst_ids = fixed_inputs["batch_dst_ids"]
+    batch_src_ids = fixed_inputs["batch_src_ids"]
+    batch_displace = fixed_inputs["batch_displace"]
+    z_src_ids = fixed_inputs["z_src_ids"]
+    z_dst_ids = fixed_inputs["z_dst_ids"]
+    size = fixed_inputs["size"]
+    wp_size = fixed_inputs["wp_size"]
+    num_edges = fixed_inputs["num_edges"]
+    atom_feat_matrix = fixed_inputs["atom_feat_matrix"]
+    atomic_mask = fixed_inputs["atomic_mask"]
+    element_mask = fixed_inputs.get("element_mask")
+    ox_states_used_mask = fixed_inputs["ox_states_used_mask"]
+    g = fixed_inputs["g"]
+    lg = fixed_inputs["lg"]
 
-    abc_scaler = scalers['abc_scaler']
-    angle_scaler = scalers['angle_scaler']
-
+    abc_scaler = scalers["abc_scaler"]
+    angle_scaler = scalers["angle_scaler"]
 
     device = scaled_batch_abc.device
-    atomic_features, bondlength, bond_angles, batch_abc, batch_angle, lattice_vectors, normalized_dist, normed_batch_dir_coords, sharpened_ox_mask = ALIGNN_preprocess(
-        scaled_batch_abc = scaled_batch_abc.to(device), 
-        scaled_batch_angle = scaled_batch_angle.to(device), 
-        batch_dir_coords = batch_dir_coords.to(device), 
-        atomic_distribution = atomic_distribution.to(device),
-        batch_dst_ids = batch_dst_ids.to(device),
-        batch_src_ids = batch_src_ids.to(device),
-        batch_displace = batch_displace.to(device),
-        z_src_ids = z_src_ids.to(device),
-        z_dst_ids = z_dst_ids.to(device),
+    (
+        atomic_features,
+        bondlength,
+        bond_angles,
+        batch_abc,
+        batch_angle,
+        lattice_vectors,
+        normalized_dist,
+        normed_batch_dir_coords,
+        sharpened_ox_mask,
+    ) = ALIGNN_preprocess(
+        scaled_batch_abc=scaled_batch_abc.to(device),
+        scaled_batch_angle=scaled_batch_angle.to(device),
+        batch_dir_coords=batch_dir_coords.to(device),
+        atomic_distribution=atomic_distribution.to(device),
+        batch_dst_ids=batch_dst_ids.to(device),
+        batch_src_ids=batch_src_ids.to(device),
+        batch_displace=batch_displace.to(device),
+        z_src_ids=z_src_ids.to(device),
+        z_dst_ids=z_dst_ids.to(device),
         size=size.to(device),
         wp_size=wp_size.to(device),
-        site_ids = fixed_inputs['site_ids'].to(device),
-        init_coords = fixed_inputs['init_coords'].to(device),
+        site_ids=fixed_inputs["site_ids"].to(device),
+        init_coords=fixed_inputs["init_coords"].to(device),
         temperature=temperature,
-        abc_scaler = abc_scaler,
-        angle_scaler = angle_scaler,
-        limit_coords_displacement = limit_coords_displacement,
-        num_edges = num_edges.to(device),
-        adding_noise_scale = adding_noise_scale,
-        abc_range = abc_range,
-        angle_range = angle_range,
-        atom_feat_matrix = atom_feat_matrix.to(device),
-        atomic_mask = atomic_mask.to(device),
-        ox_states_used_mask = ox_states_used_mask.to(device),
-        ox_mask_learnable_tensor_per_crystal = ox_mask_learnable_tensor_per_crystal.to(device),
-        wyckoff_expander = wyckoff_expander,
-        n_nodes = g.number_of_nodes(),
+        abc_scaler=abc_scaler,
+        angle_scaler=angle_scaler,
+        limit_coords_displacement=limit_coords_displacement,
+        num_edges=num_edges.to(device),
+        adding_noise_scale=adding_noise_scale,
+        abc_range=abc_range,
+        angle_range=angle_range,
+        atom_feat_matrix=atom_feat_matrix.to(device),
+        atomic_mask=atomic_mask.to(device),
+        element_mask=(element_mask.to(device) if element_mask is not None else None),
+        ox_states_used_mask=ox_states_used_mask.to(device),
+        ox_mask_learnable_tensor_per_crystal=ox_mask_learnable_tensor_per_crystal.to(
+            device
+        ),
+        wyckoff_expander=wyckoff_expander,
+        n_nodes=g.number_of_nodes(),
     )
 
     g = g.to(device)
@@ -176,17 +196,17 @@ def forward_propagation_ALIGNN(
         )
 
     output_dict = {
-        'bandgap_pred': bandgap_pred,
-        'ef_pred': ef_pred,
-        'atomic_features': atomic_features,
-        'bondlength': bondlength,
-        'bond_angles': bond_angles,
-        'batch_abc': batch_abc,
-        'batch_angle': batch_angle,
-        'lattice_vectors': lattice_vectors,
-        'normalized_dist': normalized_dist,
-        'normed_batch_dir_coords': normed_batch_dir_coords,
-        'sharpened_ox_mask': sharpened_ox_mask,
-        'pred_dict': pred_dict,
+        "bandgap_pred": bandgap_pred,
+        "ef_pred": ef_pred,
+        "atomic_features": atomic_features,
+        "bondlength": bondlength,
+        "bond_angles": bond_angles,
+        "batch_abc": batch_abc,
+        "batch_angle": batch_angle,
+        "lattice_vectors": lattice_vectors,
+        "normalized_dist": normalized_dist,
+        "normed_batch_dir_coords": normed_batch_dir_coords,
+        "sharpened_ox_mask": sharpened_ox_mask,
+        "pred_dict": pred_dict,
     }
     return bandgap_pred, ef_pred, output_dict

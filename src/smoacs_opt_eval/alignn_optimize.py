@@ -56,7 +56,7 @@ def optimize_solution_ALIGNN(
     energy_coef: float = 0.0,
     energy_every: int = 1,
     use_element_count_l1_loss: bool = False,
-    element_count_l1_weight: float = 1.0,
+    element_count_l1_weight: float = 0.0,
     optimizer: str = "gradient",
     timing_log_path: Optional[str] = None,
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor], List[torch.Tensor]]:
@@ -218,6 +218,7 @@ def optimize_solution_ALIGNN(
     )
     abc_history, angle_history = [], []
     gap_history, e_form_history, t_loss_history = [], [], []
+    force_pressure_history = {}
     element_count_l1_history, element_count_l1_max_history = [], []
     VALID_ELEMENTS98 = create_element_list()
     lattice_lr_history, atom_lr_history, coords_lr_history = [], [], []
@@ -236,11 +237,13 @@ def optimize_solution_ALIGNN(
     # (English) After copy_and_mutate, it is necessary to perform the ALIGNN graph update_step.
     copy_mutation = settings_dict["copy_mutation"]
     parse_evolution_parameters_dict = parse_evolution_parameters(copy_mutation)
+    scheduled_graph_update_steps = set(settings_dict["ALIGNN_update_step"])
+    graph_update_steps = scheduled_graph_update_steps.copy()
     if parse_evolution_parameters_dict["steps_cm"][0] != "None":
         additional_alignn_update_steps = [
             int(step) + 1 for step in parse_evolution_parameters_dict["steps_cm"]
         ]
-        settings_dict["ALIGNN_update_step"].extend(additional_alignn_update_steps)
+        graph_update_steps.update(additional_alignn_update_steps)
 
     optimization_targets = [
         scaled_batch_abc,
@@ -350,6 +353,7 @@ def optimize_solution_ALIGNN(
         ]
 
     if run_gradient:
+        mutation_graph_synced_step = None
         for step_i in tqdm(range(num_steps), desc="Optimizing", leave=False):
             global_step_i = step_i
             step_start = time.perf_counter()
@@ -358,8 +362,12 @@ def optimize_solution_ALIGNN(
             ### Update graph and inputs
             graph_updated = False
             if (
-                global_step_i in settings_dict["ALIGNN_update_step"]
+                global_step_i in graph_update_steps
                 and global_step_i != 0
+                and not (
+                    mutation_graph_synced_step == global_step_i - 1
+                    and global_step_i not in scheduled_graph_update_steps
+                )
             ):
                 print(f"<info> graph update at step {global_step_i}")
                 mini_batch_inputs_dict = graph_parameter_update(
@@ -370,6 +378,8 @@ def optimize_solution_ALIGNN(
                     num_batch_crystal=settings_dict["num_batch_crystal"],
                     wyckoff_expander=wyckoff_expander,
                     num_workers=settings_dict.get("num_workers", 4),
+                    scalers=scalers,
+                    limit_coords_displacement=limit_coords_displacement,
                 )
                 graph_updated = True
 
@@ -389,6 +399,7 @@ def optimize_solution_ALIGNN(
                 loss_composer=loss_composer,
                 primary_metrics=primary_metrics,
                 energy_module=energy_module,
+                force_pressure_config=settings_dict.get("force_pressure_config"),
                 energy_coef=energy_coef,
                 energy_every=energy_every,
                 step_i=global_step_i,
@@ -554,6 +565,8 @@ def optimize_solution_ALIGNN(
                     num_batch_crystal=settings_dict["num_batch_crystal"],
                     wyckoff_expander=wyckoff_expander,
                     num_workers=settings_dict.get("num_workers", 4),
+                    scalers=scalers,
+                    limit_coords_displacement=limit_coords_displacement,
                 )
                 graph_updated = True
                 if timing_log_path:
@@ -581,7 +594,12 @@ def optimize_solution_ALIGNN(
                     )
 
             if optimizer == "grad_sa_hybrid" and global_step_i >= grad_only_steps:
-                if size_or_wp_changed:
+                if wyckoff_expander is None and additional_info.get(
+                    "mutation_applied", False
+                ):
+                    _sync_graph_immediately("copy_mutation")
+                    mutation_graph_synced_step = global_step_i
+                elif size_or_wp_changed:
                     _sync_graph_immediately("copy_mutation_size_change")
 
                 expected_nodes = int(
@@ -638,6 +656,9 @@ def optimize_solution_ALIGNN(
                         loss_composer=loss_composer,
                         primary_metrics=primary_metrics,
                         energy_module=energy_module,
+                        force_pressure_config=settings_dict.get(
+                            "force_pressure_config"
+                        ),
                         energy_coef=energy_coef,
                         energy_every=energy_every,
                         step_i=global_step_i,
@@ -662,6 +683,7 @@ def optimize_solution_ALIGNN(
                         limit_coords_displacement=limit_coords_displacement,
                         abc_scaler=abc_scaler,
                         angle_scaler=angle_scaler,
+                        wrap_coords=wyckoff_expander is not None,
                     )
 
                 sa = SimulatedAnnealingOptimizer(
@@ -738,6 +760,10 @@ def optimize_solution_ALIGNN(
             tolerance = record_eval["tolerance"]
             element_count_l1_value = record_eval["element_count_l1_value"]
             per_crystal_loss = record_eval["per_crystal_loss"]
+            for key, value in record_eval.get("force_pressure", {}).items():
+                force_pressure_history.setdefault(key, []).append(
+                    value.detach().cpu().reshape(-1)
+                )
             gap_history.append(
                 bandgap_pred.detach().cpu().numpy()
                 if bandgap_pred is not None
@@ -760,7 +786,7 @@ def optimize_solution_ALIGNN(
                 per_crystal_loss.detach().cpu().max().item()
                 if (
                     per_crystal_loss is not None
-                    and use_element_count_l1_loss
+                    and (use_element_count_l1_loss or element_count_l1_weight != 0.0)
                 )
                 else 0.0
             )
@@ -813,7 +839,7 @@ def optimize_solution_ALIGNN(
         def evaluate_fn(state, sa_step_i):
             global_step_i = sa_step_i
             if (
-                global_step_i in settings_dict["ALIGNN_update_step"]
+                global_step_i in graph_update_steps
                 and global_step_i != 0
                 and last_output["output_dict"] is not None
             ):
@@ -827,6 +853,8 @@ def optimize_solution_ALIGNN(
                         num_batch_crystal=settings_dict["num_batch_crystal"],
                         wyckoff_expander=wyckoff_expander,
                         num_workers=settings_dict.get("num_workers", 4),
+                        scalers=scalers,
+                        limit_coords_displacement=limit_coords_displacement,
                     )
                 )
             eval_out = evaluate_loss_alignn(
@@ -845,6 +873,7 @@ def optimize_solution_ALIGNN(
                 loss_composer=loss_composer,
                 primary_metrics=primary_metrics,
                 energy_module=energy_module,
+                force_pressure_config=settings_dict.get("force_pressure_config"),
                 energy_coef=energy_coef,
                 energy_every=energy_every,
                 step_i=global_step_i,
@@ -871,6 +900,7 @@ def optimize_solution_ALIGNN(
                 limit_coords_displacement=limit_coords_displacement,
                 abc_scaler=abc_scaler,
                 angle_scaler=angle_scaler,
+                wrap_coords=wyckoff_expander is not None,
             )
 
         sa = SimulatedAnnealingOptimizer(
@@ -883,6 +913,10 @@ def optimize_solution_ALIGNN(
 
         def _log_step(sa_step_i, state, current_eval, _best_eval, stats):
             step_start = time.perf_counter()
+            for key, value in current_eval.get("force_pressure", {}).items():
+                force_pressure_history.setdefault(key, []).append(
+                    value.detach().cpu().reshape(-1)
+                )
             gap_history.append(
                 current_eval["bandgap_pred"].detach().cpu().numpy()
                 if current_eval["bandgap_pred"] is not None
@@ -981,6 +1015,7 @@ def optimize_solution_ALIGNN(
             loss_composer=loss_composer,
             primary_metrics=primary_metrics,
             energy_module=energy_module,
+            force_pressure_config=settings_dict.get("force_pressure_config"),
             energy_coef=energy_coef,
             energy_every=energy_every,
             step_i=final_step_i,
@@ -1013,6 +1048,8 @@ def optimize_solution_ALIGNN(
         ox_mask_learnable_tensor_per_crystal
     )
     optimized_mini_batch_inputs_dict["batch_dir_coords"] = batch_dir_coords
+    for key, values in force_pressure_history.items():
+        optimized_mini_batch_inputs_dict[f"{key}_history"] = torch.stack(values, dim=1)
     gap_arr = np.squeeze(np.array(gap_history))
     ef_arr = np.squeeze(np.array(e_form_history))
     t_arr = np.squeeze(np.array(t_loss_history))

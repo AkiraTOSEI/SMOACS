@@ -9,6 +9,7 @@ from src.utils.mask_utils import (
 )
 from src.utils.nn_utils import temperature_softmax
 from src.utils.scalers import ABC_Scaler, Angle_Scaler
+from src.preprocess.prepro_utils import apply_element_mask
 
 
 def calculate_cartesian_vec(
@@ -74,6 +75,7 @@ def Crystalformer_preprocess(
     adding_noise_scale: Optional[float],
     abc_range: Tuple[float, float],
     angle_range: Tuple[float, float],
+    element_mask: Optional[torch.Tensor] = None,
     atomic_dist_Z_more_than_86: bool = True,
 ) -> Tuple[
     torch.Tensor,  # batch_abc
@@ -113,6 +115,7 @@ def Crystalformer_preprocess(
         adding_noise_scale (Optional[float]): Noise amplitude to add to coordinates and lattice params.
         abc_range (Tuple[float, float]): Min/max lattice lengths after rescaling.
         angle_range (Tuple[float, float]): Min/max lattice angles after rescaling.
+        element_mask (Optional[torch.Tensor]): Hard mask for element columns. Shape: (98,).
         atomic_dist_Z_more_than_86 (bool): If True, masks atomic numbers > 86.
 
     Returns:
@@ -188,6 +191,7 @@ def Crystalformer_preprocess(
         normalized_dist = temperature_softmax(
             atomic_distribution, temperature=temperature
         )
+    normalized_dist = apply_element_mask(normalized_dist, element_mask)
 
     pos, trans_vec = calculate_cartesian_vec(
         num_candidate=size.shape[0],

@@ -12,15 +12,14 @@ from jarvis.core.atoms import Atoms
 from jarvis.core.specie import get_node_attributes
 from torch.utils.data import DataLoader
 
+from third_party.alignn_minimal.graphs import Graph, StructureDataset
 from src.utils.common import create_element_list
 from src.utils.coord import direct_to_cartesian_batch
-from third_party.alignn_minimal.graphs import Graph, StructureDataset
 from tqdm import tqdm
 
 from src.utils.coord import compute_abc_angle, compute_lattice_vectors, calculate_bond_cosine
 from src.utils.mask_utils import create_learnable_oxides_mask
 from src.spg_wp.wyckoff_expander import WyckoffExpander, assert_wyckoff_expansion_matches_atoms
-
 
 
 def load_graphs(
@@ -79,10 +78,15 @@ def load_graphs(
         WP_size = [len(site_ids)]*len(site_ids)
 
 
-        # atomsにNaNを含まれている場合は、init_poscarのグラフを読み込む
-        if np.isnan(atoms['lattice_mat']).any() or np.isnan(atoms['coords']).any() or np.isnan(atoms['abc']).any() or np.isnan(atoms['angles']).any():
-            atoms = Atoms.from_poscar(f'init_poscars/{i["jid"]}').to_dict()
-            print(f'nan included in {i["jid"]}, so load from init_poscars to convert to graph')
+        # Fallback geometry must already be reflected in the shared dataset.
+        geometry = atoms if isinstance(atoms, dict) else atoms.to_dict()
+        if not all(
+            np.isfinite(geometry[key]).all()
+            for key in ("lattice_mat", "coords", "abc", "angles")
+        ):
+            raise ValueError(
+                f"{row['jid']}: nonfinite geometry before graph construction"
+            )
 
         structure = (
             Atoms.from_dict(atoms) if isinstance(atoms, dict) else atoms
@@ -108,6 +112,12 @@ def load_graphs(
         #g.ndata["radii_for_all_ox_states"] = torch.tensor(
         #    radii_for_all_ox_states
         #).type(torch.get_default_dtype())
+        if not (g.num_nodes() == len(atom_mask_for_all_ox_states) == len(site_ids)):
+            raise ValueError(
+                f"{row['jid']}: graph/mask/site_ids mismatch: "
+                f"nodes={g.num_nodes()}, mask={len(atom_mask_for_all_ox_states)}, "
+                f"site_ids={len(site_ids)}"
+            )
         g.ndata["crystal_id"] = torch.tensor([row_i]*len(atom_mask_for_all_ox_states), dtype=torch.int64)
         g.ndata["site_ids"] = torch.tensor(site_ids).long()
 
@@ -343,7 +353,7 @@ def get_all_atoms_coords(
         ox_states_used_mask = row['ox_states_used_mask']
         atom_mask_for_all_ox_states = row['atom_mask_for_all_ox_states']
         radii_for_all_ox_states = row['radii_for_all_ox_states']
-        
+
         atoms = Atoms.from_dict(atoms_dict)
         if wp_coords is not None:
             # if wp_coords is not None, use Wyckoff expansion and use wp_coords
@@ -393,8 +403,6 @@ def get_all_atoms_coords(
         radii_for_all_ox_states_list.append(torch.tensor(radii_for_all_ox_states, dtype=torch.float32))
         wp_size_list.append(len(site_ids))
 
-
-
     batch_dir_coords = torch.cat(_dir_coords)
     batch_dst_ids = torch.cat(_dst_ids)
     batch_src_ids = torch.cat(_src_ids)
@@ -423,7 +431,6 @@ def get_all_atoms_coords(
         radii_for_all_ox_states,
         wp_size
     )
-
 
 
 def build_undirected_edge_data_tensor(
@@ -567,7 +574,6 @@ def generate_feature_matrix() -> np.ndarray:
         feats.append(get_node_attributes(elem, atom_features='cgcnn'))
     atom_feat_matrix = torch.Tensor(np.array(feats))
     return atom_feat_matrix
-
 
 
 def graph_to_tensors(

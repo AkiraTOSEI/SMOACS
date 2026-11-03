@@ -210,8 +210,6 @@ def _scaled_dot_product_attention(
         # The scaled_dot operation involves the summations along the key axis
         # whose size varies among batch samples. So we split concatenated data 
         # into a list of batch samples and apply the scaled_dot for each sample.
-        # We could do the same without the splitting & looping by using scatter_add,
-        # but we rather avoid scatter_add as it breaks reproducibility in backprop.
         if attn_weights is None:
             attn_weights = 0
 
