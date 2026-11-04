@@ -58,7 +58,7 @@ The schedules below use zero-based steps:
 | Section | Smoke mutation steps | Smoke hybrid gradient steps |
 | --- | --- | --- |
 | 2.1 | 5, 7 | Not a hybrid optimizer |
-| 2.2 | 2, 5, 7; Crystalformer unit cell: 5, 7 | Not a hybrid optimizer |
+| 2.2 | ALIGNN: 2, 5, 7; Crystalformer unit cell: 5, 7; Crystalformer 3×3×3: 6, 9 | Not a hybrid optimizer |
 | 2.3 / 2.4 | 2, 5, 7 | 5 |
 
 `run_mattersim.sh` uses a relaxation limit of ten steps in smoke mode and records
@@ -218,6 +218,12 @@ values for ALIGNN unit-cell coordinates and Crystalformer 3×3×3 optimization:
 | Crystalformer / unit cell | 0.002 | 0.005 | 0.007 |
 | ALIGNN / 3×3×3 | 0.01 | 0.000667 | 0.00004 |
 | Crystalformer / 3×3×3 | 0.6 | 0.00067 (6.7 × 10⁻⁴) | 0.002 |
+
+For all eight conditions, formation-energy success requires $E_f < -0.5$ eV/atom
+(Table 2). Crystalformer 3×3×3 uses batch size 32, mutation steps 120 and 180
+(zero-based), `top_ratio=0.42`, `mutation_noise=0.02`, and
+`group_C_use_rate=0.27`, matching the manuscript and SI Table B.2.
+The other conditions use batch size 128; all conditions use 128 candidates.
 
 ```bash
 cd reproducibility/section_2_2

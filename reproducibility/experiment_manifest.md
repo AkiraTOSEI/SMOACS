@@ -49,6 +49,12 @@ Details of SA and mutation are given in [README.md](README.md).
 実行時はリポジトリ直下の `data/intermidiate/` にある共用マスクとの一致を確認します。
 各条件を200 steps実行し、学習率は実行スクリプトで次の値を明示指定します。
 
+Table 2に合わせ、全8条件の形成エネルギー成功条件を `E_f < -0.5 eV/atom` とします。
+Crystalformerの3×3×3は、原稿とSI Table B.2に合わせてbatch sizeを32、
+mutationのstepを120・180（0始まり）、`top_ratio`を0.42、
+`mutation_noise`を0.02、`group_C_use_rate`を0.27に設定します。
+smoke実行ではbatch sizeを2、mutationのstepを6・9に縮小します。
+
 | モデル / セル | 格子学習率 | 座標学習率 | 元素分布学習率 |
 | --- | --- | --- | --- |
 | ALIGNN / 単位胞 | 9.0 | 0.002 | 0.00005 |
@@ -64,8 +70,8 @@ Details of SA and mutation are given in [README.md](README.md).
 | Crystalformer | 単位胞 | 4.0 | 128 | 128 | 42 | `section_2_2_Crystalformer_unit_cell_bg4p0` |
 | ALIGNN | 3×3×3 | 0.5 | 128 | 128 | 42 | `section_2_2_ALIGNN_3x3x3_bg0p5` |
 | ALIGNN | 3×3×3 | 4.0 | 128 | 128 | 42 | `section_2_2_ALIGNN_3x3x3_bg4p0` |
-| Crystalformer | 3×3×3 | 0.5 | 128 | 128 | 42 | `section_2_2_Crystalformer_3x3x3_bg0p5` |
-| Crystalformer | 3×3×3 | 4.0 | 128 | 128 | 42 | `section_2_2_Crystalformer_3x3x3_bg4p0` |
+| Crystalformer | 3×3×3 | 0.5 | 128 | 32 | 42 | `section_2_2_Crystalformer_3x3x3_bg0p5` |
+| Crystalformer | 3×3×3 | 4.0 | 128 | 32 | 42 | `section_2_2_Crystalformer_3x3x3_bg4p0` |
 
 ## Section 2.3
 

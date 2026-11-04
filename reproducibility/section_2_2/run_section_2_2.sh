@@ -2,7 +2,7 @@
 set -euo pipefail
 export SMOACS_DEVICE="${SMOACS_DEVICE:-cuda}"
 
-# 原稿の条件を学習率の明示指定で実行。
+# 原稿の条件を学習率・成功判定・mutation設定の明示指定で実行。
 section_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$section_dir/../.." && pwd)"
 cd -- "$repo_root"
@@ -30,16 +30,20 @@ done
 
 num_candidate=128
 b_size=128
+cf_supercell_b_size=32
 num_steps=200
 mutation_steps=50-100-150
 cf_unit_mutation_steps=100-150
+cf_supercell_mutation_steps=120-180
 exp_suffix=""
 if [[ "${SMOACS_SMOKE_TEST:-0}" == 1 ]]; then
     num_candidate=2
     b_size=2
+    cf_supercell_b_size=2
     num_steps=10
     mutation_steps=2-5-7
     cf_unit_mutation_steps=5-7
+    cf_supercell_mutation_steps=6-9
     exp_suffix="__smoke"
 fi
 
@@ -57,9 +61,9 @@ for target in 0.5 4.0; do
         --space_group -1 \
         --target_val "$target" \
         --training_margin 0.04 \
-        --eval_margin 2.0 \
+        --eval_margin 0.2 \
         --e_form_coef 1.0 \
-        --e_form_criteria 1.0 \
+        --e_form_criteria -0.5 \
         --abc_min 2.0 \
         --abc_max 10.0 \
         --num_candidate "$num_candidate" \
@@ -95,9 +99,9 @@ for target in 0.5 4.0; do
         --space_group -1 \
         --target_val "$target" \
         --training_margin 0.04 \
-        --eval_margin 2.0 \
+        --eval_margin 0.2 \
         --e_form_coef 1.0 \
-        --e_form_criteria 1.0 \
+        --e_form_criteria -0.5 \
         --abc_min 2.0 \
         --abc_max 10.0 \
         --num_candidate "$num_candidate" \
@@ -133,9 +137,9 @@ for target in 0.5 4.0; do
         --space_group -1 \
         --target_val "$target" \
         --training_margin 0.04 \
-        --eval_margin 2.0 \
+        --eval_margin 0.2 \
         --e_form_coef 1.0 \
-        --e_form_criteria 1.0 \
+        --e_form_criteria -0.5 \
         --abc_min 2.0 \
         --abc_max 10.0 \
         --num_candidate "$num_candidate" \
@@ -171,13 +175,13 @@ for target in 0.5 4.0; do
         --space_group -1 \
         --target_val "$target" \
         --training_margin 0.04 \
-        --eval_margin 2.0 \
+        --eval_margin 0.2 \
         --e_form_coef 1.0 \
-        --e_form_criteria 1.0 \
+        --e_form_criteria -0.5 \
         --abc_min 2.0 \
         --abc_max 10.0 \
         --num_candidate "$num_candidate" \
-        --b_size "$b_size" \
+        --b_size "$cf_supercell_b_size" \
         --num_workers 4 \
         --max_ox_patterns 100 \
         --optimizer gradient \
@@ -186,7 +190,7 @@ for target in 0.5 4.0; do
         --lattice_lr 0.6 \
         --coords_lr 0.00067 \
         --atom_lr 0.002 \
-        --copy_mutation_override "copy_mutation___steps_cm-${mutation_steps}__mutation_noise-0.00001__top_ratio-0.3__group_C_use_rate-0.2__atom_dist_init-True" \
+        --copy_mutation_override "copy_mutation___steps_cm-${cf_supercell_mutation_steps}__mutation_noise-0.02__top_ratio-0.42__group_C_use_rate-0.27__atom_dist_init-True" \
         --energy_coef 0.0 \
         --initial_structures_path reproducibility/section_2_2/templates_masks/historical_3x3x3 \
         --alignn_weights_dir models/alignn_pretrained \
