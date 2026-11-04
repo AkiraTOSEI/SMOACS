@@ -2,7 +2,6 @@
 set -euo pipefail
 export SMOACS_DEVICE="${SMOACS_DEVICE:-cuda}"
 
-# 著者指定の 2–30 原子 PKL を使う再実行コマンド。
 # 全 10,050 レコードを収録した PKL の先頭 8,192 件を使用します。
 section_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$section_dir/../.." && pwd)"
@@ -12,7 +11,7 @@ test -f main.py || { echo '公開リポジトリ直下にこの配布物を配�
 initial_structures=reproducibility/section_2_4/templates_masks/initial_mp_nsites2_30__mask_dict_super_common_level5.pkl
 mattersim_model="${SMOACS_MATTERSIM_MODEL:-${HOME}/.local/mattersim/pretrained_models/mattersim-v1.0.0-5M.pth}"
 test -f "$initial_structures" || {
-    echo "著者指定の再実行用 PKL が必要です: $initial_structures" >&2
+    echo "初期構造とマスクの PKL が必要です: $initial_structures" >&2
     exit 1
 }
 test -f "$mattersim_model" || {

@@ -5,7 +5,7 @@ See the [repository README](../README.md) for environment setup and model prepar
 Download the fixed inputs from
 [reproducibility.tar.gz](https://drive.google.com/file/d/1AkoDieWZFWFm8UgBXrS61XvfiHjtiEGC/view?usp=sharing)
 and extract the data directories using the command in the repository README.
-Use the scripts in this Git checkout; the remote archive may contain older scripts.
+Use the scripts in this Git checkout.
 The directory belongs at `<repo_root>/reproducibility/`.
 
 ## Example
@@ -348,7 +348,7 @@ filename and records its mapping to the original template-derived ID in a CSV fi
 - Section 2.3: Prepare all proposed structures without additional filtering by band gap or element count.
 - Section 2.4: Stage 1 requires the saved `bandgap_onehot <= 0.05 eV` and an element count of `<= 5`.
   Only structures that also have a saved `minbond_less_than_0.5 == True` are prepared.
-  Because the column name is potentially misleading, the saved decision in the original CSV is used
+  The saved decision in the original CSV is used
   without recalculating the distance check. The two Stage 1 criteria and distance-based exclusions
   are recorded in separate columns of the input preparation record.
   For the original six level5 experiments, 21,712 of 49,152 candidates passed Stage 1;

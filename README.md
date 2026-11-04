@@ -383,8 +383,7 @@ tar -xzf reproducibility.tar.gz \
 ```
 
 This extracts the fixed inputs into the existing `reproducibility/` directory.
-Run the scripts from this Git checkout: an older download may contain older
-scripts, so the extraction command selects only the data directories. After preparing the environment and
+Run the scripts from this Git checkout. After preparing the environment and
 models described above, you can run the section-specific commands below.
 
 Initial structures and masks are stored in each section's `templates_masks/` directory.
@@ -484,7 +483,7 @@ initialization controls, and output names.
 ### Multi-property design of perovskite structures
 
 The same script runs the unit-cell and 135-atom 3×3×3 supercell experiments in Section 2.2.
-For each cell size, the inputs contain the first 128 structures in the original directory's read order, as specified by the authors for this release.
+For each cell size, the inputs contain the first 128 structures in the original directory's read order.
 The selected filenames and their read order are preserved.
 The ALIGNN unit-cell coordinate learning rate is 0.002. For Crystalformer 3×3×3,
 the lattice, coordinate, and atom-distribution learning rates are 0.6,
@@ -508,8 +507,8 @@ bash run_section_2_3.sh
 ### Half metal proposal
 
 Section 2.4 uses
-`initial_mp_nsites2_30__mask_dict_super_common_level5.pkl`, as specified by the authors for this release.
-The file contains all 10,050 entries; the first 8,192 are used for this rerun.
+`initial_mp_nsites2_30__mask_dict_super_common_level5.pkl`.
+The file contains all 10,050 entries; the first 8,192 are used.
 Details of the inputs and execution procedure are provided in the [reproducibility README](reproducibility/README.md).
 
 ```bash

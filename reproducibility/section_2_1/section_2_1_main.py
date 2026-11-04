@@ -1027,13 +1027,6 @@ def nearest_neighbor_edges(
             id=id,
         )
     # build up edge list
-    # NOTE: currently there's no guarantee that this creates undirected graphs
-    # An undirected solution would build the full edge list where nodes are
-    # keyed by (index, image), and ensure each edge has a complementary edge
-
-    # indeed, JVASP-59628 is an example of a calculation where this produces
-    # a graph where one site has no incident edges!
-
     # build an edge dictionary u -> v
     # so later we can run through the dictionary
     # and remove all pairs of edges
@@ -8899,33 +8892,13 @@ def main_experiment(
     exp_name: Optional[str] = None,
     output_root: Optional[str] = None,
 ):
-    """
-    #デバッグ用の引数設定
-    trial = None
-    all_reusult_dict = None
-    num_steps = 200
-    bandgap_margin = 0.04
-    num_candidate = 256
-    num_batch_crystal = 256
-    crystal_system = None
-    test_noise_scales = []
-    model_name = 'Crystalformer' #'Crystalformer' or 'ALIGNN' or 'Both'
-    E_form_criteria = -0.5
+    """Run one Section 2.1 Crystalformer ablation condition.
 
-    target_bandgap = 2.0
-    perovskite_size = None
-    angle_range = (30, 150)
-    abc_range = (2.0, 10.0)
-    exp_id = 0
-    atom_lr = 6.0
-    lattice_lr = 0.02
-    coords_lr = 0.03
-    atom_cycle = 1
-    lattice_cycle = 1
-    coords_cycle = 1
-    limit_coords_displacement = None
-    ALIGNN_update_step = calculate_update_steps(num_steps=200, num_update=4)
-    test_mode = False
+    run_section_2_1.sh uses 128 candidates, batch size 128, and 200 steps,
+    repeating each condition with seeds 42, 43, 44, and 45. The target band
+    gap is 2.5 eV, with optimization and evaluation half-widths of 0.04 and
+    0.2 eV. Atom, lattice, and coordinate learning rates are 0.007, 0.002,
+    and 0.005, respectively.
     """
 
     if not exp_name or Path(exp_name).name != exp_name or exp_name in {".", ".."}:
@@ -8997,7 +8970,7 @@ def main_experiment(
 
     # ----------------- Hyperparameters ----------------- #
 
-    mask_method = "super_common"  # 'common' 推奨？　酸化数を現実的なものに制限できる
+    mask_method = "super_common"
     tolerance_range = (None, None)  # ペロブスカイトのトレランス
     use_atomic_mask = True  # 基データの電荷に従った原子マスクを使うかどうか
     use_formation_energy = True  # formation energyの最適化を行うかどうか
