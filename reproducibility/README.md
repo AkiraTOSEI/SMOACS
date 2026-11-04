@@ -3,7 +3,7 @@
 This directory contains the run scripts, initial structures, masks, and DFT inputs for each section.
 See the [repository README](../README.md) for environment setup and model preparation.
 Download the fixed inputs from
-[reproducibility.tar.gz](https://drive.google.com/file/d/1weAa-YMkUwjZYaL5g4pFhwiV0FnCN6Jm/view?usp=sharing)
+[reproducibility.tar.gz](https://drive.google.com/file/d/1eCET1IfM5W-HxZ15FSpY1xkFAZDyGvz9/view?usp=sharing)
 and extract the data directories using the command in the repository README.
 Use the scripts in this Git checkout.
 The directory belongs at `<repo_root>/reproducibility/`.
