@@ -370,7 +370,7 @@ The scripts and data for Results Sections 2.1–2.4 of the paper are provided in
 
 Because the reproducibility package includes large initial-structure and mask files,
 it is distributed as a separate archive. Download
-[reproducibility.tar.gz](https://drive.google.com/file/d/1AkoDieWZFWFm8UgBXrS61XvfiHjtiEGC/view?usp=sharing)
+[reproducibility.tar.gz](https://drive.google.com/file/d/1weAa-YMkUwjZYaL5g4pFhwiV0FnCN6Jm/view?usp=sharing)
 to the repository root, then run the following command from that directory:
 
 ```bash
