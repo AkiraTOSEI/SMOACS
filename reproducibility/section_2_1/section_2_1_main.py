@@ -8891,6 +8891,7 @@ def main_experiment(
     seed: int = 42,
     exp_name: Optional[str] = None,
     output_root: Optional[str] = None,
+    eval_margin: float = 0.2,
 ):
     """Run one Section 2.1 Crystalformer ablation condition.
 
@@ -8934,6 +8935,7 @@ def main_experiment(
         "output_root": str(Path(result_dir).parent),
         "target_bandgap": target_bandgap,
         "bandgap_margin": bandgap_margin,
+        "eval_margin": eval_margin,
         "E_form_criteria": E_form_criteria,
         "atom_lr": atom_lr,
         "lattice_lr": lattice_lr,
@@ -9208,6 +9210,11 @@ def main_experiment(
             gap_min = target_bandgap - bandgap_margin
             gap_max = target_bandgap + bandgap_margin
             gap_loss_func = GapLoss(gap_min=gap_min, gap_max=gap_max, mode=mode)
+            gap_loss_func_for_eval = GapLoss(
+                gap_min=target_bandgap - eval_margin,
+                gap_max=target_bandgap + eval_margin,
+                mode=mode,
+            )
             # ----------------- Experiment and File Names ----------------- #
             configuration_name = define_experiment_name(
                 model_name=model_name,
@@ -9289,7 +9296,7 @@ def main_experiment(
                     bandgap_model=bandgap_model,
                     e_form_model=e_form_model,
                     Ef_coef_schedule=Ef_coef_schedule,
-                    gap_loss_func=gap_loss_func,
+                    gap_loss_func=gap_loss_func_for_eval,
                     crystal_system=crystal_system,
                     limit_coords_displacement=limit_coords_displacement,
                     tolerance_loss_func=tolerance_loss_func,
@@ -9306,7 +9313,7 @@ def main_experiment(
                         bandgap_model=bandgap_model,
                         e_form_model=e_form_model,
                         Ef_coef_schedule=Ef_coef_schedule,
-                        gap_loss_func=gap_loss_func,
+                        gap_loss_func=gap_loss_func_for_eval,
                         crystal_system=crystal_system,
                         tolerance_loss_func=tolerance_loss_func,
                         e_form_min=e_form_min,
@@ -9573,6 +9580,18 @@ def main():
     parser.add_argument("--num_candidate", type=int, default=128)
     parser.add_argument("--b_size", type=int, default=128)
     parser.add_argument("--num_steps", type=int, default=200)
+    parser.add_argument(
+        "--training_margin",
+        type=float,
+        default=0.04,
+        help="Band gap half-width for optimization (eV)",
+    )
+    parser.add_argument(
+        "--eval_margin",
+        type=float,
+        default=0.2,
+        help="Band gap half-width for evaluation and success (eV)",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--exp_name", required=True)
     parser.add_argument(
@@ -9602,7 +9621,8 @@ def main():
         num_steps=args.num_steps,
         num_candidate=args.num_candidate,
         num_batch_crystal=args.b_size,
-        bandgap_margin=0.04,
+        bandgap_margin=args.training_margin,
+        eval_margin=args.eval_margin,
         target_bandgap=2.5,
         crystal_system=None,
         perovskite_size=None,

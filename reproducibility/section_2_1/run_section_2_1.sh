@@ -28,6 +28,8 @@ for initialization in random-random random-AtomicMask Struct-random Struct-Atomi
             "${PYTHON:-python}" "$section_dir/section_2_1_main.py" \
                 --initialization "$initialization" \
                 --method "$method" \
+                --training_margin 0.04 \
+                --eval_margin 0.2 \
                 --num_candidate "$num_candidate" \
                 --b_size "$b_size" \
                 --num_steps "$num_steps" \
