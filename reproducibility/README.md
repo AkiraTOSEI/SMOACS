@@ -3,7 +3,7 @@
 This directory contains the run scripts, initial structures, masks, and DFT inputs for each section.
 See the [repository README](../README.md) for environment setup and model preparation.
 Download the fixed inputs from
-[reproducibility.tar.gz](https://drive.google.com/file/d/1weAa-YMkUwjZYaL5g4pFhwiV0FnCN6Jm/view?usp=sharing)
+[reproducibility.tar.gz](https://drive.google.com/file/d/1eCET1IfM5W-HxZ15FSpY1xkFAZDyGvz9/view?usp=sharing)
 and extract the data directories using the command in the repository README.
 Use the scripts in this Git checkout.
 The directory belongs at `<repo_root>/reproducibility/`.
@@ -77,7 +77,6 @@ copy/mutation targets even when the scheduled operation is called.
 │       └── poscar/
 └── reproducibility/
     ├── README.md
-    ├── experiment_manifest.md
     ├── prepare_mattersim_inputs.py
     ├── run_mattersim.sh
     ├── section_2_1/
@@ -117,7 +116,6 @@ The following files are written to `results/`. See the README.md at the reposito
 
 | File | Purpose |
 | --- | --- |
-| [experiment_manifest.md](experiment_manifest.md) | Mapping of sections, experimental conditions, inputs, seeds, run scripts, and output locations |
 | `run_section_2_*.sh` in each section | SMOACS arguments, including candidate count, batch size, seed, learning rates, loss coefficients, and optimizer |
 
 ## Section 2.1: Crystalformer Ablation Study

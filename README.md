@@ -370,7 +370,7 @@ The scripts and data for Results Sections 2.1–2.4 of the paper are provided in
 
 Because the reproducibility package includes large initial-structure and mask files,
 it is distributed as a separate archive. Download
-[reproducibility.tar.gz](https://drive.google.com/file/d/1weAa-YMkUwjZYaL5g4pFhwiV0FnCN6Jm/view?usp=sharing)
+[reproducibility.tar.gz](https://drive.google.com/file/d/1eCET1IfM5W-HxZ15FSpY1xkFAZDyGvz9/view?usp=sharing)
 to the repository root, then run the following command from that directory:
 
 ```bash
@@ -388,7 +388,6 @@ models described above, you can run the section-specific commands below.
 
 Initial structures and masks are stored in each section's `templates_masks/` directory.
 
-The experiment settings, inputs, and output locations are listed in [experiment_manifest.md](reproducibility/experiment_manifest.md).
 
 | Section | Experiment settings | Run script |
 | --- | --- | --- |
