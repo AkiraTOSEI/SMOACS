@@ -30,7 +30,7 @@ done
 
 num_candidate=128
 b_size=128
-cf_supercell_b_size=32
+supercell_b_size=32
 num_steps=200
 mutation_steps=50-100-150
 cf_unit_mutation_steps=100-150
@@ -39,7 +39,7 @@ exp_suffix=""
 if [[ "${SMOACS_SMOKE_TEST:-0}" == 1 ]]; then
     num_candidate=2
     b_size=2
-    cf_supercell_b_size=2
+    supercell_b_size=2
     num_steps=10
     mutation_steps=2-5-7
     cf_unit_mutation_steps=5-7
@@ -143,7 +143,7 @@ for target in 0.5 4.0; do
         --abc_min 2.0 \
         --abc_max 10.0 \
         --num_candidate "$num_candidate" \
-        --b_size "$b_size" \
+        --b_size "$supercell_b_size" \
         --num_workers 4 \
         --max_ox_patterns 100 \
         --optimizer gradient \
@@ -181,7 +181,7 @@ for target in 0.5 4.0; do
         --abc_min 2.0 \
         --abc_max 10.0 \
         --num_candidate "$num_candidate" \
-        --b_size "$cf_supercell_b_size" \
+        --b_size "$supercell_b_size" \
         --num_workers 4 \
         --max_ox_patterns 100 \
         --optimizer gradient \

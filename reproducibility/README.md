@@ -221,7 +221,8 @@ For all eight conditions, formation-energy success requires $E_f < -0.5$ eV/atom
 (Table 2). Crystalformer 3×3×3 uses batch size 32, mutation steps 120 and 180
 (zero-based), `top_ratio=0.42`, `mutation_noise=0.02`, and
 `group_C_use_rate=0.27`, matching the manuscript and SI Table B.2.
-The other conditions use batch size 128; all conditions use 128 candidates.
+ALIGNN 3×3×3 also uses batch size 32. Both unit-cell models use batch size 128;
+all conditions use 128 candidates.
 
 ```bash
 cd reproducibility/section_2_2
